@@ -1,0 +1,57 @@
+## --- [ RESULTADOS DE COMPILACIÓN ] ---
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## --- [ .NET CORE / ASP.NET ] ---
+# Archivo de configuración local (contiene credenciales o puertos)
+appsettings.Development.json
+appsettings.Local.json
+
+.config/
+# Archivos de publicación
+*.publishsettings
+publish/
+out/
+
+## --- [ VISUAL STUDIO ] ---
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+
+## --- [ VS CODE ] ---
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+## --- [ PAQUETES Y DEPENDENCIAS ] ---
+# NuGet Packages
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+# Node (si tienes frontend en el mismo repo)
+node_modules/
+npm-debug.log*
+
+## --- [ TEST RESULTS ] ---
+TestResults/
+*.sequenced.json
+
+## --- [ SISTEMA OPERATIVO ] ---
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# macOS
+.DS_Store
+
+## --- [ OTROS ] ---
+# Archivos temporales de Word/Excel (si generas reportes)
+~$*
