@@ -163,6 +163,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                                 else
                                                 {
                                                     cell.Value = number;
+                                                    cell.Style.NumberFormat.Format = "#,##0.00";
                                                 }
                                                 break;
 

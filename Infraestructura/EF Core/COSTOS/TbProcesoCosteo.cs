@@ -1,10 +1,11 @@
-﻿using System;
+﻿using CostManagement.Infraestructura.EF_Core;
+using Microsoft.EntityFrameworkCore;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using Microsoft.EntityFrameworkCore;
 
-namespace CostManagement.Infraestructura.EF_Core;
+namespace CostManagementService.Infraestructura.EF_Core;
 
 /// <summary>
 /// Procesos para costeo de produccion (primarios: recepcion, codificacion, descabezado); congelacion (brine, iqf, tunel), etc.
@@ -20,7 +21,7 @@ public partial class TbProcesoCosteo
     public short PrEmpCodigo { get; set; }
 
     [Column("pr_descri")]
-    [StringLength(15)]
+    [StringLength(60)]
     [Unicode(false)]
     public string PrDescri { get; set; } = null!;
 
@@ -68,6 +69,13 @@ public partial class TbProcesoCosteo
     [Unicode(false)]
     public string? PrEquipoEli { get; set; }
 
+    [Column("pr_tipCodigo")]
+    [StringLength(5)]
+    [Unicode(false)]
+    public string? PrTipCodigo { get; set; }
+
+    [Column("pr_editable")]
+    public bool? PrEditable { get; set; }
     [InverseProperty("PcPr")]
     public virtual ICollection<TbParametroCosteo> TbParametroCosteo { get; set; } = new List<TbParametroCosteo>();
 }

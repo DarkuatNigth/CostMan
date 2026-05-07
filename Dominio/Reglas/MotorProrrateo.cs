@@ -92,7 +92,7 @@ namespace CostManagement.Dominio.Reglas
                 .ToDictionary(g => g.Key, g => (decimal)g.Sum(x => x.dbLibras));
 
             var lbsTot = lstItemsLote
-                .Where(x => x.strAgrupacion == "1. RECIBIDO")
+                .Where(x => x.strAgrupacion == "1. RECIBIDO" && !x.blExcluidoCosteo)
                 .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod)))
                 .ToDictionary(g => g.Key, g => (decimal)g.Sum(x => x.dbLibras));
 

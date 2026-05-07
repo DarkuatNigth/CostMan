@@ -31,23 +31,21 @@ namespace CostManagement.Dominio.Reglas
             _objLogger = logger;
         }
         public void AsignarCostRecibiXFrsMovCam(
-            List<MatPrimaReproceso> lstMatPrimaReproceso,
             List<PrecioFrsXMov> lstPrecioLiqOtrProc,
             List<PrecioFrsXMov> lstPrecioFrsXMovCam,
-            List<LiquidacionResultado> lstMatPrimaFresco)
+            DataProcesoParam objDataProceso)
         {
 
-            if (lstMatPrimaReproceso == null) throw new ArgumentNullException(nameof(lstMatPrimaReproceso));
+            if (objDataProceso.lstLiqRepro == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqRepro));
             if (lstPrecioLiqOtrProc == null) throw new ArgumentNullException(nameof(lstPrecioLiqOtrProc));
             if (lstPrecioFrsXMovCam == null) throw new ArgumentNullException(nameof(lstPrecioFrsXMovCam));
-            if (lstMatPrimaFresco == null) throw new ArgumentNullException(nameof(lstMatPrimaFresco));
+            if (objDataProceso.lstLiqFresco == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqFresco));
             // Lógica de diccionarios
-            var dictCostoProdXTalla = LiquidacionResultado.GenerarDiccionarioCostoXTalla(lstMatPrimaFresco);
+            var dictCostoProdXTalla = LiquidacionResultado.GenerarDiccionarioCostoXTalla(objDataProceso.lstLiqFresco);
             var dictLiqOtrCostoProdXTalla = PrecioFrsXMov.GenerarDiccionarioCostoXTalla(lstPrecioLiqOtrProc);
             var dictLiqMovCamCostoProdXTalla = PrecioFrsXMov.GenerarDiccionarioCostoXTalla(lstPrecioFrsXMovCam);
 
-            var lstMatPrimaRpcFilt = MatPrimaReproceso.GenerarLstFiltRec(lstMatPrimaReproceso);
-
+            var lstMatPrimaRpcFilt = MatPrimaReproceso.GenerarLstFiltRec(objDataProceso.lstLiqRepro);
             foreach (var liq in lstMatPrimaRpcFilt)
             {
                 var keyBuscada = (liq.intLoteOrigen, liq.intProdCod, liq.intCodTal);
@@ -110,14 +108,15 @@ namespace CostManagement.Dominio.Reglas
         public void RendimientoReproPlanRecibProc(List<MatPrimaReproceso> lstTotalLibrasRecProc)
         {
             if (lstTotalLibrasRecProc == null) throw new ArgumentNullException(nameof(lstTotalLibrasRecProc));
+            decimal dcCostoProc, dcCostTotalProc, dcCostoTotalMatEmp, dcTotalDol;
             var lstRendiLookup = (
                     from lbsRecProc in lstTotalLibrasRecProc
-                    where lbsRecProc.intCodCopacking == 0
+                    //where lbsRecProc.intCodCopacking == 0
                     group new { lbsRecProc } by new
                     {
-                        lbsRecProc.strTipCod//,
-                        //lbsRecProc.intLotNumero,
-                        //lbsRecProc.intLoteUnificado
+                        //lbsRecProc.strTipCod
+                        lbsRecProc.intLotNumero,
+                        lbsRecProc.intLoteUnificado
                     } into g
                     let totalRecibido = g
                         .Where(obj =>
@@ -129,39 +128,43 @@ namespace CostManagement.Dominio.Reglas
                         .Sum(obj => obj.lbsRecProc.dbLibras)
                     select new
                     {
-                        g.Key.strTipCod,
-                        //g.Key.intLotNumero,
-                        //g.Key.intLoteUnificado,
+                        //g.Key.strTipCod,
+                        g.Key.intLotNumero,
+                        g.Key.intLoteUnificado,
                         Rendimiento = totalRecibido != 0 ? (totalProcesado / totalRecibido) : 0
                     }
                     ).ToList()
-                    .ToLookup( x=> x.strTipCod);
+                    .ToLookup( x=> /*x.strTipCod*/(x.intLotNumero, x.intLoteUnificado));
 
-            foreach (var objRendimiento in lstTotalLibrasRecProc)
+            foreach (var objLiq in lstTotalLibrasRecProc)
             {
-
-                var objValRendi = lstRendiLookup[objRendimiento.strTipCod].FirstOrDefault();
+                var objkey = (objLiq.intLotNumero, objLiq.intLoteUnificado);
+                var objValRendi = lstRendiLookup[objkey].FirstOrDefault();
                 if (objValRendi != null)
-                    objRendimiento.dbRendimiento = objValRendi.Rendimiento;
+                    objLiq.dbRendimiento = objValRendi.Rendimiento;
+                if (objValRendi == null )
+                {
+                    var obj = objkey;
+                }
+                if (objLiq.strAgrupacion != "2. PROCESADO" || objLiq.dbLibras <= 0 || objLiq.dcCostoTotXLibra != null) continue;
 
-                if (objRendimiento.strAgrupacion != "2. PROCESADO" || objRendimiento.dbLibras <= 0) continue;
-
-                decimal dcCostoTot =
-                    (objRendimiento.dcCostTotalProc ?? 0m)
-                  + (objRendimiento.dcCostoTotalMatEmp ?? 0m)
-                  + (objRendimiento.dcCertificado ?? 0m)
-                  + objRendimiento.dbCostoTotal; 
-
-                objRendimiento.dcCostoTotXLibra = Math.Truncate((dcCostoTot / (decimal)objRendimiento.dbLibras) * 100m) / 100m;
+                dcCostTotalProc = (objLiq.dcCostTotalProc ?? 0m);
+                dcCostoTotalMatEmp = (objLiq.dcCostoTotalMatEmp ?? 0m);
+                dcTotalDol = (decimal)objLiq.dbCostoTotal;
+                dcCostoProc = (objLiq.dcTarifaProc ?? 0m); 
+                objLiq.dcTotalDolSum = dcCostTotalProc + dcCostoTotalMatEmp + dcTotalDol + dcCostoProc;
+                objLiq.dcCostoTotXLibra = Math.Truncate((objLiq.dcTotalDolSum / (decimal)objLiq.dbLibras) * 100m) / 100m;
+                objLiq.dcValidador = (decimal)objLiq.dcCostoTotXLibra - (decimal)objLiq.dbCostoXSecuencial; 
             }
         }
 
 
         public void AsignarPrecio(MatPrimaReproceso objLiq, decimal precio, string nivel)
         {
+            if (objLiq.blExcluidoCosteo && objLiq.strAgrupacion == "1. RECIBIDO") return; 
             objLiq.dbCostoXSecuencial = Math.Round(precio, 4);
             objLiq.dbCostoTotal = Math.Round(precio * (decimal)objLiq.dbLibras, 2);
-            if (nivel != null) objLiq.strNivel = nivel;
+            if (nivel != null) objLiq.strNivel = nivel;        
         }
 
 
@@ -330,12 +333,6 @@ namespace CostManagement.Dominio.Reglas
             bool blEsEgresoEtiqueteo = _strCodTiploEti.Equals(codTip);
             switch (diario.strTipo, blEsEgresoEtiqueteo)
             {
-
-                //case (_strTipoMovE, true):
-                //case (_strTipoMovI, true):
-                //    objFuente = AplicarCostoEtiqueteo(diario, ctx, diario.strTipo);
-                //    break;
-
                 case (_strTipoMovE, false):
                     objFuente = AplicarCostoExport(diario, ctx);
                     break;

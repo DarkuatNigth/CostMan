@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using CostManagementService.Infraestructura.EF_Core;
 using Microsoft.EntityFrameworkCore;
 
 namespace CostManagement.Infraestructura.EF_Core;

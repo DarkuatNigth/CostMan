@@ -6,7 +6,6 @@ namespace CostManagement.Dominio.Entidades
 {
     public class MatPrimaReproceso
     {
-
         [NotMapped] 
         [JsonIgnore]
         public string strTipCod { get; set; }
@@ -69,7 +68,7 @@ namespace CostManagement.Dominio.Entidades
         [Column("Trazabilidad")]
         public string strNivel { get; set; }
 
-        [Column("Tipo Proc Prod")]
+        [Column("Proc Prod")]
         public string strProClas03 { get; set; }
 
         [JsonIgnore]
@@ -82,10 +81,6 @@ namespace CostManagement.Dominio.Entidades
         [Column("Libras Pelado")]
         public decimal? dcLibrasPelado { get; set; }
 
-        [JsonIgnore]
-        [Column("Libras Retractilado")]
-        public decimal? dcLibrasRetractilado { get; set; }
-
         [Column("Rendimiento %")]
         public double dbRendimiento { get; set; }
 
@@ -95,37 +90,32 @@ namespace CostManagement.Dominio.Entidades
         [Column("Certificado")]
         public string? strCertificado { get; set; }
 
-        [Column("Premio")]
-        public decimal? dcCertificado { get; set; }
+        //[JsonIgnore]
+        [Column("Libras Retractilado")]
+        public decimal? dcLibrasRetractilado { get; set; }
 
         [Column("Costo X Secuencial")]
         public decimal dbCostoXSecuencial { get; set; }
-
-
-        //[NotMapped]
-        //[JsonIgnore]
-        [Column("C.Copacking")]
-        public decimal? dcCostoCopacking { get; set; }
-
-
 
         //[NotMapped]
         //[JsonIgnore]
         [Column("Costo Mat Empaque")]
         public decimal dcCostoMatEmpaque { get; set; }
 
-
-
+        //[NotMapped]
+        //[JsonIgnore]
+        [Column("Excedente")]
+        public decimal? dcExcedente { get; set; }
 
         //[NotMapped]
         //[JsonIgnore]
-        [Column("Costos Directos")]
-        public ProcesoCostDirectoDto ProcesoCostFijo { get; set; } = new ProcesoCostDirectoDto();
+        [Column("Copacking")]
+        public decimal? dcCostoCopacking { get; set; }
 
         //[NotMapped]
         //[JsonIgnore]
-        [Column("Costos Indirectos")]
-        public ProcesoCostIndirectoDto ProcesoCostIndirecto { get; set; } = new ProcesoCostIndirectoDto();
+        [Column("Proceso")]
+        public decimal? dcTarifaProc { get; set; }
 
         //[NotMapped]
         //[JsonIgnore]
@@ -146,21 +136,41 @@ namespace CostManagement.Dominio.Entidades
         //[JsonIgnore]
         [Column("Proceso Congelacion")] // Este nombre será el título del Merge en Excel
         public ProcesoCongelacionDto ProcesoCongelacion { get; set; } = new ProcesoCongelacionDto();
-        
-        [Column("Costo Proceso")]
-        public decimal? dcCostTotalProc { get; set; }
 
         //[NotMapped]
         //[JsonIgnore]
-        [Column("Costo Total Mat Empaque")]
+        [Column("Costos Directos")]
+        public ProcesoCostDirectoDto ProcesoCostFijo { get; set; } = new ProcesoCostDirectoDto();
+
+        //[NotMapped]
+        //[JsonIgnore]
+        [Column("Costos Indirectos")]
+        public ProcesoCostIndirectoDto ProcesoCostIndirecto { get; set; } = new ProcesoCostIndirectoDto();
+
+        [Column("Premio")]
+        public decimal? dcCertificado { get; set; }
+
+
+        [Column("Total Materia Prima")]
+        public decimal dbCostoTotal { get; set; }
+
+        //[NotMapped]
+        //[JsonIgnore]
+        [Column("Total Mat Empaque")]
         public decimal? dcCostoTotalMatEmp { get; set; }
 
-        [Column("Costo Mat Prima")]
-        public decimal dbCostoTotal { get; set; }
+        [Column("Total Proceso")]
+        public decimal? dcCostTotalProc { get; set; }
+
+        [Column("Total Costos")]
+        public decimal dcTotalDolSum { get; set; }
         //[NotMapped]
         //[JsonIgnore]
         [Column("Costo X Libra")]
         public decimal? dcCostoTotXLibra { get; set; }
+
+        [Column("Validador")]
+        public decimal dcValidador { get; set; }
 
         [NotMapped]
         [JsonIgnore]
@@ -212,7 +222,7 @@ namespace CostManagement.Dominio.Entidades
         public decimal? dcClasificacion { get; set; }
 
         [JsonIgnore]
-        public decimal? dcCodificacion { get; set; }
+        public decimal? dcCajas { get; set; }
 
         [JsonIgnore]
         public decimal? dcDescabezado { get; set; }
@@ -288,6 +298,10 @@ namespace CostManagement.Dominio.Entidades
 
         public int? intTidCodigo { get; set; }
 
+        [NotMapped]
+        [JsonIgnore]
+        public bool blExcluidoCosteo { get; set; }
+
         public MatPrimaReproceso() { }
 
 
@@ -311,8 +325,10 @@ namespace CostManagement.Dominio.Entidades
         {
             try
             {
+                HashSet<string> lstTiplot =
+               new(StringComparer.OrdinalIgnoreCase) { "R7", "R6", "UNI" };
                 strTipCod = tipCod.Trim();
-                strTipDescri = tipDescri;
+                strTipDescri = tipDescri.Trim();
                 strClaseProd = claseProd;
                 strLotTipo = lotTipo;
                 intCodCopacking = Convert.ToInt32(CodCopacking);
@@ -351,8 +367,8 @@ namespace CostManagement.Dominio.Entidades
                 dcCthSallbs = RecPorcSal;
                 dcCthHidlbs = RecPorHid;
                 intRtCodItem = RtCodItem.HasValue ? (int)RtCodItem.Value : null;
-                dcLibrasPelado = PesoPelado != null && pelado  ? (decimal)dbLibras/*PesoPelado*/ : 0m;
-                dcLibrasRetractilado = lbsRetractilado != null && retractilado ? (decimal)dbLibras/*lbsRetractilado.Value */: 0m;
+                dcLibrasPelado = PesoPelado != null && pelado  ? (decimal)/*dbLibras*/PesoPelado : 0m;
+                dcLibrasRetractilado = lbsRetractilado != null && retractilado ? (decimal)lbsRetractilado/*lbsRetractilado.Value */: 0m;
                 strBodCod = BodCod;
                 strEmbCodigo = EmbCodigo;
                 intMedCodigo = (int)MedCodigo;
@@ -360,7 +376,7 @@ namespace CostManagement.Dominio.Entidades
                 blBodEsBrine = bodEsBrine ?? false;
                 intRtaCodigo = RtaCodigo.HasValue ? (int)RtaCodigo.Value : null;
                 intTidCodigo = TidCodigo.HasValue ? (int)TidCodigo.Value : null;
-                blEsDescabezado = esDescabezado;
+                blEsDescabezado = esDescabezado && lstTiplot.Contains(strTipCod) ? true : false;
                 intProCongela = proCongela.HasValue ? (int)proCongela.Value : 0;
             }
             catch (Exception ex)
@@ -375,11 +391,12 @@ namespace CostManagement.Dominio.Entidades
                 decimal? loteUnificado, string plantaProceso, string tipoProducto, string congeProduc,
                 decimal loteOrigen, DateTime? fechaLote, decimal recibido, decimal? lotProces,
                 DateTime? lotFecha, string prodCod, string descriProduc, string talDescri,
-                double libras, string agrupacion, int codTal
+                double libras, string agrupacion, int codTal,
+                HashSet<LoteRpcKeyReci> hashLotePiso  // ← único parámetro nuevo
             )
         {
             strTipCod = tipCod.Trim();
-            strTipDescri = tipDescri;
+            strTipDescri = tipDescri.Trim();
             strClaseProd = claseProd;
             strLotTipo = lotTipo;
             intCodCopacking = Convert.ToInt32(CodCopacking);
@@ -402,7 +419,8 @@ namespace CostManagement.Dominio.Entidades
             dbLibras = libras;
             strAgrupacion = agrupacion;
             intCodTal = codTal;
-
+            blExcluidoCosteo = hashLotePiso?.Contains(
+                    new LoteRpcKeyReci((int)loteOrigen, Convert.ToInt32(prodCod), codTal)) ?? false;
         }
 
         
@@ -648,22 +666,7 @@ namespace CostManagement.Dominio.Entidades
             dcCertificado = Math.Round(dcValCertPrecio * (decimal)dbLibras, 2);
             dcValorCert = dcValCertPrecio;
         }
-        public void InitializerCostPremio()
-        {
-            dcCertificado = Math.Round((decimal)(dcValorCert * (decimal)dbLibras), 2);
-        }
 
-        public void MergeValorizacion(MatPrimaReproceso valorizado)
-        {
-            if (valorizado == null) return;
-
-            // Sobreescribimos solo los campos de cálculo/costo que vienen de la tabla valorizada
-            dbCostoXSecuencial = valorizado.dbCostoXSecuencial;
-            dbCostoTotal = valorizado.dbCostoTotal;
-            InitializerCostPremio();
-            //if (this.dcLibras == 0) this.dcLibras = valorizado.dcLibras;
-            //if (this.dcMasters == 0 || this.dcMasters == null) this.dcMasters = valorizado.dcMasters;
-        }
 
         public static List<long> ObtenerLstLoteXRepro(IEnumerable<MatPrimaReproceso> lstMatPrimaReproceso, MatPrimaReproceso item)
         {

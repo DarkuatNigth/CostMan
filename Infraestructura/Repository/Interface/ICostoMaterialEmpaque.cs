@@ -24,5 +24,6 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task ObtenerCostoMaterialEmpaqueXLiqProd(List<MatPrimaReproceso> lstMatPrimaReproceso);
 
         Task<List<CostoMatEmpaDto>> ObtenerCostoEmpaqueXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin);
+        Task<List<CostoMatEmpaDto>> ObtenerCostoEmpaqueXLote(List<int> lstLotesFrsRpc);
     }
 }

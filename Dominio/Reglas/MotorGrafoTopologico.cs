@@ -1,4 +1,5 @@
-﻿using CostManagement.Dominio.Entidades;
+﻿using CostManagement.Aplicación.DTos;
+using CostManagement.Dominio.Entidades;
 
 namespace CostManagement.Dominio.Reglas
 {
@@ -19,22 +20,21 @@ namespace CostManagement.Dominio.Reglas
 
         // ── Punto de entrada principal ─────────────────────────────────────────
         public void CostearTodosLotesEnOrden(
-            List<MatPrimaReproceso> lstRpc,
-            List<LiquidacionResultado> lstFresco,
+            DataProcesoParam objDataProceso,
             List<PrecioFrsXMov> lstPrecioFrsUni,
             List<PrecioFrsXMov> lstPrecioFrsDir)
         {
-            var (lstDependencias, lstDependientes) = MatPrimaReproceso.DetectarCadenasDependencia(lstRpc);
+            var (lstDependencias, lstDependientes) = MatPrimaReproceso.DetectarCadenasDependencia(objDataProceso.lstLiqRepro);
             _objLogger.LogInformation($"[Topo] Deps: {lstDependencias.Count} | Fuentes: {lstDependientes.Count}");
 
-            var lstTodos = lstRpc
+            var lstTodos = objDataProceso.lstLiqRepro
                 .Select(x => new LoteRpcKeyXSec(x.intLotNumero, x.intLoteUnificado))
                 .ToHashSet();
 
             var (lstOrden, lstCiclos) = MatPrimaReproceso.OrdenarLotesTopologicamente(lstTodos, lstDependencias, lstDependientes);
             if (lstCiclos.Any()) _objLogger.LogWarning($"[Topo] {lstCiclos.Count} lote(s) en ciclo → NV4.");
 
-            var objIndice = lstRpc.ToLookup(x => new LoteRpcKeyXSec(x.intLotNumero, x.intLoteUnificado));
+            var objIndice = objDataProceso.lstLiqRepro.ToLookup(x => new LoteRpcKeyXSec(x.intLotNumero, x.intLoteUnificado));
 
             // Topo-loop
             foreach (var objLote in lstOrden)
@@ -43,10 +43,10 @@ namespace CostManagement.Dominio.Reglas
 
                 if (blTieneInter)
                     foreach (var fuente in lstDependencias[objLote])
-                        TransferirPrecioFuente(fuente, objLote, objIndice, lstRpc);
+                        TransferirPrecioFuente(fuente, objLote, objIndice, objDataProceso.lstLiqRepro);
 
                 _objMotorProrra.Ejecutar(
-                    lstRpc, lstFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+                    objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
                     strVersionCtx: blTieneInter ? "CHAIN" : "ROOT",
                     objLotesPermitidos: new HashSet<LoteRpcKeyXSec> { objLote },
                     objIndiceXLote: objIndice);
@@ -54,11 +54,11 @@ namespace CostManagement.Dominio.Reglas
 
             // NV4: barrido global de rezagados
             _objMotorProrra.Ejecutar(
-                lstRpc, lstFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+                objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
                 strVersionCtx: "NV4", objLotesPermitidos: null, objIndiceXLote: null);
 
             // Propagación post-NV4
-            PropagacionPostNV4(lstRpc, lstFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+            PropagacionPostNV4(objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
                                objIndice, lstDependencias, lstDependientes);
         }
 

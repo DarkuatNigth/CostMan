@@ -23,6 +23,9 @@ public partial class TbMateriaPrimaFrescoValorizadaMotivoCambios
     [Unicode(false)]
     public string McMotivo { get; set; } = null!;
 
+    [Column("mc_costoTotalAnterior", TypeName = "numeric(18, 5)")]
+    public decimal? McCostoTotalAnterior { get; set; }
+
     [Column("mc_estado")]
     [StringLength(2)]
     [Unicode(false)]

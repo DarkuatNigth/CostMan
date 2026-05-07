@@ -61,21 +61,22 @@ namespace CostManagement.API.Controllers
         [HttpGet("param-proc")]
         public async Task<IActionResult> ParamProc(string strAnio, string strMes)
         {
-            List<ProcesoResultadoDto> lstDataProcParam, lstDataFrs, lstDataRpc;
+            List<ProcesoResultadoDto> lstDataTarifa, lstDataFrs, lstDataRpc;
+            DataProcesoParam objData;
             try
             {
-                DateTime dtFechaCorte = new DateTime(Convert.ToInt16(strAnio), Convert.ToInt16(strMes), DateTime.DaysInMonth(Convert.ToInt16(strAnio), Convert.ToInt16(strMes)));  
-                lstDataProcParam = await _objCostoMateriaPrima.ObtenerParametroProceso(dtFechaCorte);
+                DateTime dtFechaCorte = new DateTime(Convert.ToInt16(strAnio), Convert.ToInt16(strMes), DateTime.DaysInMonth(Convert.ToInt16(strAnio), Convert.ToInt16(strMes)));
+                objData = await _objCostoMateriaPrima.ObtenerParametroProceso(dtFechaCorte);
 
-                lstDataFrs = lstDataProcParam.Where(x => x.strTipoLote?.ToUpper() == "PFR").ToList();
-
-                lstDataRpc = lstDataProcParam.Where(x => x.strTipoLote?.ToUpper() == "RPC").ToList();
-
+                lstDataFrs = objData.lstProcesoFrs;
+                lstDataRpc = objData.lstProcesoRpc;
+                lstDataTarifa = objData.lstProcesoTarifa;
                 //var dtResult = DataTablesResultDto.FromList(lstDataProcParam, 0);
                 var dtResult = new DataTablesResultDto
                 {
                     Table = lstDataFrs.AListaDeDiccionarios(), // Cargamos FRS en Table
-                    Table1 = lstDataRpc.AListaDeDiccionarios() // Cargamos RPC en Table1
+                    Table1 = lstDataRpc.AListaDeDiccionarios(), // Cargamos RPC en Table1
+                    Table2 = lstDataTarifa.AListaDeDiccionarios() // Cargamos Tarifa en Table2
                 };
                 return Ok(new ApiResponse<DataTablesResultDto>
                 {
@@ -117,7 +118,7 @@ namespace CostManagement.API.Controllers
 
                 // 3. Llamar a la lógica de negocio (Feature o Service)
                 // Nota: Asegúrate de que registrarParametros esté expuesto en tu Feature
-                bool resultado = await _objCostoMateriaPrima.RegistrarParamProcPfr(objGuardarParam.LstValores, dtFechaCorte, objGuardarParam.strUsuario);
+                bool resultado = await _objCostoMateriaPrima.RegistrarParamProcPfr(dtFechaCorte, objGuardarParam);
 
                 if (resultado)
                 {

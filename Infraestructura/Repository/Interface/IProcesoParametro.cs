@@ -5,14 +5,16 @@ namespace CostManagement.Infraestructura.Repository.Interface
 {
     public interface IProcesoParametro
     {
-        Task<List<ProcesoResultadoDto>> ObtenerProcesosFrescoConValores(DateOnly fechaCorte);
-        Task<List<ProcesoResultadoDto>> ObtenerProcesosReproConValores(DateOnly fechaCorte);
-        Task<bool>  RegistrarParamCosteoPfr(List<ProcesoResultadoDto> detalles, DateOnly fechaCorte, string strUsuario);
+        #region Parametros Costeo
+        Task<List<ProcesoResultadoDto>> ConsultarProcesosFrescoConValores(DateOnly fechaCorte);
+        Task<List<ProcesoResultadoDto>> ConsultarProcesosReproConValores(DateOnly fechaCorte);
+        Task<List<ProcesoResultadoDto>> ConsultarProcesoTarifa(DateOnly fechaCorte);
+        Task<bool>  RegistrarParamCosteoPfr( DateOnly fechaCorte, GuardarParametrosRequest objParam);
+        #endregion
 
+        #region Catalogo Parametrizacion
         Task<List<string>> ConsultarCatalogoXCab(int intCab);
         Task<List<string>> ConsultarCatalogoXDes(string strDescp);
-
-        Task ObtenerCostosProcesosMatPrimPFR(List<LiquidacionResultado> lstLiquidaciones, DateOnly dtFechaFin);
-        Task ObtenerCostosProcesosRepro(List<MatPrimaReproceso> lstLiquidaciones, DateOnly dtFechaFin);
+        #endregion
     }
 }
