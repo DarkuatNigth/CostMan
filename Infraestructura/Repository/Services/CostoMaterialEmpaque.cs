@@ -323,7 +323,6 @@ namespace CostManagement.Infraestructura.Repository.Services
             List<MatPrimaReproceso> lstMatPrimaReproSinCostMatProd;
             Dictionary<LoteRpcKeyLoteXProd, Queue<decimal>> dictCostMatEmp;
             Dictionary<LoteRpcKeyLoteXProd, Queue<List<MatPrimaReproceso>>> dictColasProd;
-            Queue<List<MatPrimaReproceso>> objLstMatPrima;
             decimal dcCostoUnit, dcNuevoCosto;
             decimal? dcUltCostValido = null;
             try
@@ -429,6 +428,58 @@ namespace CostManagement.Infraestructura.Repository.Services
 
                         }
                     ).ToListAsync();
+
+                await LlenarInfoProdCostoEmpaque(lstResultados);
+                await LlenarInfoItemCostoEmpaque(lstResultados);
+                return lstResultados;
+            }
+            catch (Exception ex)
+            {
+                _objLogger.LogError($"[MaterialEmpaque].[ObtenerCostoEmpaqueXRangoFecha] Ocurrio un error: {ex.Message}");
+                throw;
+            }
+        }
+
+        public async Task<List<CostoMatEmpaDto>> ObtenerCostoEmpaqueXLote(List<int> lstLotesFrsRpc)
+        {
+            try
+            {
+                using var objContext = await _objCostosContext.CreateDbContextAsync();
+                List<CostoMatEmpaDto> lstResultados =
+                    await objContext.TbCostoEmpaqueCab
+                                .AsNoTracking()
+                                .SelectManyBatchAsync(
+                                    keySelector: cab => cab.CeRloNumero,
+                                    values: lstLotesFrsRpc,
+                                    selector: filtered =>
+                                        from cab in filtered
+                                        join det in objContext.TbCostoEmpaqueDet on cab.CeId equals det.CdCcId
+                                        select new CostoMatEmpaDto
+                                        {
+                                            strProCodCor = cab.CeProCodcor,
+                                            strProDesEsp = cab.CeProCodcor, // Reemplazar con la descripción real si está disponible
+                                            strMarDescri = "N/A", // Reemplazar con la marca real si está disponible
+                                            dcEftCantidad = (float)det.CdEftCantidad,
+                                            strAlmDescri = "",// Reemplazar con la descripción real si está disponible tb_almace
+                                            dcEmbPeso = (float)cab.CcEmbPeso,
+                                            strMedDescri = cab.CcMedCodigo.ToString(), // Reemplazar con la descripción real si está disponible
+                                            dcLibxMaster = (float)cab.CeLbsMaster,
+                                            intEftItem = (int)det.CdEftId,
+                                            strIteDesCor = det.CdEftId.ToString(),// reemplazar con la descripción real si está disponible
+                                            ftCostoXMaster = (float)Math.Round((det.CdCostoPromedio * det.CdEftCantidad), 4),
+                                            ftCostoXLibra = (float)Math.Round(((det.CdCostoPromedio * det.CdEftCantidad) / cab.CeLbsMaster), 4),
+                                            dcCosPro = det.CdCostoPromedio,
+                                            dcCostUltConsumo = (float)det.CdCostoUltimoConsumo,
+                                            intTotal = (double)cab.CcCosto,
+                                            strSubClase = "",// LLENAR CON tb_color col_descri
+                                            strEmbDescri = cab.CcEmbCodigo,  // reemplazar con la descripción real si está disponible
+                                            dcProCostoDesperdicioBobina = det.CdCostoDespericioBobina,
+                                            strEstadoEmpaque = det.CdOrigenCosto,
+                                            intLiqLote = cab.CeRloNumero,
+                                            dtFechaLote = cab.CeFecha,
+
+                                        }
+                                );
 
                 await LlenarInfoProdCostoEmpaque(lstResultados);
                 await LlenarInfoItemCostoEmpaque(lstResultados);

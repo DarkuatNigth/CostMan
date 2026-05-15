@@ -5,7 +5,9 @@ using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Repository.Interface;
 using CostManagement.Infraestructura.Utils;
+using CostManagementService.Aplicacion.DTos;
 using CostManagementService.Aplicación.DTos;
+using CostManagementService.Aplicacion.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -28,14 +30,17 @@ namespace CostManagement.API.Controllers
         private readonly ILogger<ReportingController> _objLogger;
         private readonly IExcelExportService _excelService;
         private readonly CalculoCostosFeature _objCostoMateriaPrima;
+        private readonly OperacionComercialFeature _objOperacionComercial;
         public ReportingController(
             ILogger<ReportingController> objLogger,
             CalculoCostosFeature objCostoMateriaPrima,
+            OperacionComercialFeature objOperacionComercial,
             IExcelExportService excelService,
             CostManagementDbContext objContext)
         {
             _objLogger = objLogger;
             _objCostoMateriaPrima = objCostoMateriaPrima;
+            _objOperacionComercial = objOperacionComercial;
             _excelService = excelService;
             _objContext = objContext;
         }
@@ -45,7 +50,7 @@ namespace CostManagement.API.Controllers
         {
             try
             {
-                List<LiquidacionResultado> lstTotalResultados = await _objCostoMateriaPrima.ObtenerLiquidadaValorizada(dtFechaInicio, dtFechaFin);
+                List<LiquidacionResultado> lstTotalResultados = await _objCostoMateriaPrima.ObtenerLiquidacionValorizada(dtFechaInicio, dtFechaFin);
                 List<bool> lstBool = new List<bool> { true };
                 var dtResult = new DataTablesResultDto
                 {
@@ -332,6 +337,100 @@ namespace CostManagement.API.Controllers
             }
         }
 
+
+
+        [HttpGet("diario-mov")]
+        public async Task<IActionResult> ObtenerDiarioMovimiento(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+
+            try
+            {
+
+                List<DiarioCosto> lstResult = await _objCostoMateriaPrima.ObtenerDiarioCostoAsync(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Consulta ejecutada correctamente",
+                    objData = dtResult
+                });
+
+            }
+            catch (Exception objException)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error al obtener la informacion: " + objException.Message,
+                    objData = ""
+                });
+            }
+        }
+
+
+
+        [HttpGet("saldo-inv")]
+        public async Task<IActionResult> ObtenerSaldoInventario(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+
+            try
+            {
+
+                List<DiarioCosto> lstResult = await _objCostoMateriaPrima.ObtenerDiarioCostoAsync(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Consulta ejecutada correctamente",
+                    objData = dtResult
+                });
+
+            }
+            catch (Exception objException)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error al obtener la informacion: " + objException.Message,
+                    objData = ""
+                });
+            }
+        }
+
+
+        [HttpGet("diario-costo-venta")]
+        public async Task<IActionResult> ObtenerVentasVsFacturas(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+
+            try
+            {
+
+                var lstResult = 
+                    await _objOperacionComercial.ObtenerReporteVentasVsFacturas(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Consulta ejecutada correctamente",
+                    objData = dtResult
+                });
+
+            }
+            catch (Exception objException)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error al obtener la informacion: " + objException.Message,
+                    objData = ""
+                });
+            }
+        }
+
+
         [HttpPost("exportar-excel")]
         public async Task<IActionResult> ExportarLiquidacionesExcel([FromBody] DataGeneralRequest request)
         {
@@ -343,6 +442,7 @@ namespace CostManagement.API.Controllers
             List<CostoMatEmpaDto> materialEmpaque;
             List<MatPrimaReproceso> materiaPrimaRepro;
             List<InvValDataDto> invValDataDtos;
+            List<RptVentaVsFactura> lstReportVent;
             List<DiarioCosto> lstDiarioCost;
             DataTable dataTable = new DataTable();
             try
@@ -361,6 +461,12 @@ namespace CostManagement.API.Controllers
                 {
                     case "materia-prima":
                         liquidaciones = await
+                            _objCostoMateriaPrima.ObtenerLiquidacionValorizada(fechaInicio, fechaFin);
+                        dataTable = liquidaciones.ADataTable();
+                        break;
+
+                    case "materia-prima-Liq":
+                        liquidaciones = await
                             _objCostoMateriaPrima.ObtenerReporteMateriaPrimaValorizada(fechaInicio, fechaFin);
                         dataTable = liquidaciones.ADataTable();
                         break;
@@ -377,12 +483,20 @@ namespace CostManagement.API.Controllers
                         dataTable = materiaPrimaRepro.ADataTable();
                         break;
 
+                    case "diario-mov":
+                        lstDiarioCost = await
+                            _objCostoMateriaPrima.ObtenerDiarioCostoAsync(fechaInicio, fechaFin);
+                        dataTable = lstDiarioCost.ADataTable();
+                        break;
+
+                    case "diario-costo-venta":
+                        lstReportVent = await
+                            _objOperacionComercial.ObtenerReporteVentasVsFacturas(fechaInicio, fechaFin);
+                        dataTable = lstReportVent.ADataTable();
+                        break;
+
                     case "materia-prima-sal":
                         var obj = await _objCostoMateriaPrima.ObtenerInventarioValorizado(fechaInicio, fechaFin);
-                        //lstDiarioCost = await
-                        //    _objCostoMateriaPrima.ObtenerDiarioCostoAsync(fechaInicio, fechaFin);
-
-                        //dataTable = lstDiarioCost.ADataTable();
                         dataTable =  obj.ADataTable();
                         break;
 

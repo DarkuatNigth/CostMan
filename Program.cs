@@ -1,9 +1,8 @@
 ﻿using CostManagement.Aplicación.Features;
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.DBContext;
-using CostManagement.Infraestructura.Repository.Interface;
-using CostManagement.Infraestructura.Repository.Services;
 using CostManagement.Infraestructura.Utils;
+using CostManagementService.Infraestructura.Repository;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
-    serverOptions.Limits.MaxRequestBodySize = 209715200; 
+    serverOptions.Limits.MaxRequestBodySize = 209715200;
 });
 
 // 2. Configurar FormOptions (por si acaso usas multipart/form-data en el futuro)
@@ -59,13 +58,15 @@ builder.Services.AddControllers()
     {
         options.SerializerSettings.DateFormatString = "yyyy-MM-ddTHH:mm:ss";
     });
-builder.Services.AddScoped<IExcelExportService, ExcelExportService>();
-builder.Services.AddScoped<IProcesoParametro, ProcesoParametro>();
-builder.Services.AddScoped<ICostoMaterialEmpaque, CostoMaterialEmpaque>();
-builder.Services.AddScoped<IMateriaPrima, MateriaPrima>();
-builder.Services.AddScoped<CalculoCostosFeature>();
+//Se reemplaza la forma de agregar servicios de la capa de infraestructura para evitar problemas de dependencias circulares
+//builder.Services.AddScoped<IExcelExportService, ExcelExportService>();
+//builder.Services.AddScoped<IProcesoParametro, ProcesoParametro>();
+//builder.Services.AddScoped<ICostoMaterialEmpaque, CostoMaterialEmpaque>();
+//builder.Services.AddScoped<IMateriaPrima, MateriaPrima>();
+//builder.Services.AddSingleton<OpenJsonToInClauseInterceptor>();
+//builder.Services.AddScoped<CalculoCostosFeature>();
+builder.Services.AddInfrastructureServices();
 
-builder.Services.AddSingleton<OpenJsonToInClauseInterceptor>();
 
 
 builder.Services.AddCors(options =>
@@ -135,7 +136,7 @@ if (app.Environment.IsDevelopment())
 
 // ========== USAR CORS (ANTES DE UseAuthorization) ==========
 app.UseCors("AllowAll");
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 
 app.UseAuthorization();
 

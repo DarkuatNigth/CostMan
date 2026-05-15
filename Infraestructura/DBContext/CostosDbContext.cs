@@ -131,7 +131,7 @@ public partial class CostosDbContext : DbContext
 
         modelBuilder.Entity<TbProcesoCosteo>(entity =>
         {
-            entity.ToTable("tb_procesoCosteo", "costos", tb => tb.HasComment("Procesos para costeo de produccion (primarios: recepcion, codificacion, descabezado); congelacion (brine, iqf, tunel), etc."));
+            entity.ToTable("tb_procesoCosteo", "costos", tb => tb.HasComment("Procesos para costeo de produccion (primarios: recepcion, cajas, descabezado); congelacion (brine, iqf, tunel), etc."));
 
             entity.Property(e => e.PrId).ValueGeneratedOnAdd();
             entity.Property(e => e.PrEquipoCrea).HasDefaultValueSql("(host_name())");

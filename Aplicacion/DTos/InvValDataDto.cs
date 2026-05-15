@@ -112,5 +112,46 @@ namespace CostManagement.Aplicación.DTos
 
         [JsonIgnore]
         public short? stTalCodigo { get; set; }
+
+
+        /// <summary>
+        /// Normaliza la descripción de talla del Excel para que coincida con TbTallas.
+        /// Maneja:
+        ///   - Fechas parseadas por Excel: "2026-05-09 00:00:00" no se normaliza (se corrige antes en ObtenerDatosProd)
+        ///   - Ceros iniciales: "5-09" → "5-9"
+        ///   - Errores tipográficos: "MEDIUN" → "MEDIUM"
+        /// El resultado usa '-' como separador (consistente con lstCodTalla que ya hizo Replace('/','-')).
+        /// </summary>
+        public static string NormalizarTalla(string strNomTal)
+        {
+            if (string.IsNullOrWhiteSpace(strNomTal))
+                return strNomTal;
+
+            // Si es una fecha (parseada por Excel), no intentar normalizar
+            // La corrección se hace antes en ObtenerDatosProd desde strCodigoTalla
+            //if (DateTime.TryParse(strNomTal, out _))
+            //    return strNomTal;
+
+            // Corrección de errores tipográficos conocidos
+            string strResultado = strNomTal.Trim().Replace("MEDIUN", "MEDIUM");
+
+            string[] arrStrPartes = strResultado.Split('-');
+
+            // Si tiene exactamente 2 partes y ambas son números, es una TALLA
+            if (arrStrPartes.Length == 2 && arrStrPartes.All(strP => strP.Trim().All(char.IsDigit)))
+            {
+                // Limpiamos ceros a la izquierda: "09" -> "9"
+                strResultado = string.Join("-", arrStrPartes.Select(strP =>
+                {
+                    string strLimpio = strP.Trim().TrimStart('0');
+                    return string.IsNullOrEmpty(strLimpio) ? "0" : strLimpio;
+                }));
+
+                return strResultado; // Retornamos la talla ya limpia ("5-9")
+            }
+
+            return strResultado;
+        }
+
     }
 }

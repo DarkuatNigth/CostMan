@@ -1,4 +1,5 @@
-﻿using CostManagement.Dominio.Entidades;
+﻿using CostManagement.Aplicación.DTos;
+using CostManagement.Dominio.Entidades;
 
 namespace CostManagement.Dominio.Reglas
 {
@@ -19,22 +20,21 @@ namespace CostManagement.Dominio.Reglas
 
         // ── Punto de entrada principal ─────────────────────────────────────────
         public void CostearTodosLotesEnOrden(
-            List<MatPrimaReproceso> lstRpc,
-            List<LiquidacionResultado> lstFresco,
+            DataProcesoParam objDataProceso,
             List<PrecioFrsXMov> lstPrecioFrsUni,
             List<PrecioFrsXMov> lstPrecioFrsDir)
         {
-            var (lstDependencias, lstDependientes) = MatPrimaReproceso.DetectarCadenasDependencia(lstRpc);
+            var (lstDependencias, lstDependientes) = MatPrimaReproceso.DetectarCadenasDependencia(objDataProceso.lstLiqRepro);
             _objLogger.LogInformation($"[Topo] Deps: {lstDependencias.Count} | Fuentes: {lstDependientes.Count}");
 
-            var lstTodos = lstRpc
-                .Select(x => new LoteRpcKeyXSec(x.intLotNumero, x.intLoteUnificado))
+            var lstTodos = objDataProceso.lstLiqRepro
+                .Select(x => x.objLoteKey)
                 .ToHashSet();
 
             var (lstOrden, lstCiclos) = MatPrimaReproceso.OrdenarLotesTopologicamente(lstTodos, lstDependencias, lstDependientes);
             if (lstCiclos.Any()) _objLogger.LogWarning($"[Topo] {lstCiclos.Count} lote(s) en ciclo → NV4.");
 
-            var objIndice = lstRpc.ToLookup(x => new LoteRpcKeyXSec(x.intLotNumero, x.intLoteUnificado));
+            var objIndice = objDataProceso.lstLiqRepro.ToLookup(x => x.objLoteKey);
 
             // Topo-loop
             foreach (var objLote in lstOrden)
@@ -43,10 +43,10 @@ namespace CostManagement.Dominio.Reglas
 
                 if (blTieneInter)
                     foreach (var fuente in lstDependencias[objLote])
-                        TransferirPrecioFuente(fuente, objLote, objIndice, lstRpc);
+                        TransferirPrecioFuente(fuente, objLote, objIndice, objDataProceso.lstLiqRepro);
 
                 _objMotorProrra.Ejecutar(
-                    lstRpc, lstFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+                    objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
                     strVersionCtx: blTieneInter ? "CHAIN" : "ROOT",
                     objLotesPermitidos: new HashSet<LoteRpcKeyXSec> { objLote },
                     objIndiceXLote: objIndice);
@@ -54,11 +54,11 @@ namespace CostManagement.Dominio.Reglas
 
             // NV4: barrido global de rezagados
             _objMotorProrra.Ejecutar(
-                lstRpc, lstFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+                objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
                 strVersionCtx: "NV4", objLotesPermitidos: null, objIndiceXLote: null);
 
             // Propagación post-NV4
-            PropagacionPostNV4(lstRpc, lstFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+            PropagacionPostNV4(objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
                                objIndice, lstDependencias, lstDependientes);
         }
 
@@ -74,7 +74,7 @@ namespace CostManagement.Dominio.Reglas
                          && x.dbCostoXSecuencial != 0
                          && x.intLotNumero == objLoteFuente.intLoteSecuencial
                          && x.intLoteUnificado == objLoteFuente.intLoteUnificado)
-                .GroupBy(x => (x.intProdCod, x.intCodTal))
+                .GroupBy(x => x.objProdTalKey)
                 .ToDictionary(
                     g => g.Key,
                     g => {
@@ -100,7 +100,7 @@ namespace CostManagement.Dominio.Reglas
                 x.intLoteOrigen == objLoteFuente.intLoteUnificado &&
                 !_lstNotTipCod.Contains(x.strTipCod)))
             {
-                var objKey = (rec.intProdCod, rec.intCodTal);
+                LoteRpcKeyXProdTal objKey = rec.objProdTalKey;
                 decimal dcPrecio = 0m;
                 string strNivel = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod));
 
@@ -109,7 +109,7 @@ namespace CostManagement.Dominio.Reglas
                     dcPrecio = p1;
                     //strNivel = "NV" + NivelCosteo.ObtenerNivel(rec.strTipCod) + "-CHAIN";
                 }
-                else if (dictGlobal?.TryGetValue(new LoteRpcKeyXProdTal(rec.intProdCod, rec.intCodTal), out decimal p2) == true && p2 > 0)
+                else if (dictGlobal?.TryGetValue(objKey, out decimal p2) == true && p2 > 0)
                 {
                     dcPrecio = p2;
                     //strNivel = "NV" + NivelCosteo.ObtenerNivel(rec.strTipCod) + "-REF";
@@ -133,7 +133,7 @@ namespace CostManagement.Dominio.Reglas
             Dictionary<LoteRpcKeyXSec, HashSet<LoteRpcKeyXSec>> dependientes)
         {
             var objIndiceUnif = lstRpc
-                .Select(x => new LoteRpcKeyXSec(x.intLotNumero, x.intLoteUnificado))
+                .Select(x => x.objLoteKey)
                 .Distinct()
                 .GroupBy(k => k.intLoteUnificado)
                 .ToDictionary(g => g.Key, g => g.ToList());
@@ -144,7 +144,7 @@ namespace CostManagement.Dominio.Reglas
             {
                 var conProcCosteado = lstRpc
                     .Where(x => x.strAgrupacion == "2. PROCESADO" && x.dbCostoXSecuencial > 0)
-                    .Select(x => new LoteRpcKeyXSec(x.intLotNumero, x.intLoteUnificado))
+                    .Select(x => x.objLoteKey)
                     .ToHashSet();
 
                 var objDesbloqueados = new HashSet<LoteRpcKeyXSec>();
@@ -155,7 +155,7 @@ namespace CostManagement.Dominio.Reglas
                     !_lstNotTipCod.Contains(x.strTipCod) &&
                     objIndiceUnif.ContainsKey(x.intLoteOrigen)).ToList())
                 {
-                    var objKey = new LoteRpcKeyXSec(rec.intLotNumero, rec.intLoteUnificado);
+                    var objKey = rec.objLoteKey;
                     if (lstImposibles.Contains(objKey)) continue;
 
                     bool blEsLogro = false;
@@ -174,7 +174,7 @@ namespace CostManagement.Dominio.Reglas
                     if (!blEsLogro && objIndiceUnif[rec.intLoteOrigen].Any(f => conProcCosteado.Contains(f)))
                     {
                         lstImposibles.Add(objKey);
-                        _objLogger.LogWarning($"[PropPost] Lote {objKey.intLoteSecuencial} imposible para Prod {rec.intProdCod}.");
+                        //_objLogger.LogWarning($"[PropPost] Lote {objKey.intLoteSecuencial} imposible para Prod {rec.intProdCod}.");
                     }
                 }
 
@@ -183,7 +183,7 @@ namespace CostManagement.Dominio.Reglas
                 {
                     var dictRef = lstRpc
                         .Where(x => x.strAgrupacion == "1. RECIBIDO" && x.dbCostoXSecuencial > 0 && x.dbLibras > 0)
-                        .GroupBy(x => new LoteRpcKeyXProdTal(x.intProdCod, x.intCodTal))
+                        .GroupBy(x => x.objProdTalKey)
                         .ToDictionary(
                             g => g.Key,
                             g => {
@@ -197,7 +197,7 @@ namespace CostManagement.Dominio.Reglas
                         x.dbCostoXSecuencial == 0 &&
                         !NivelCosteo.AplicaMetodoEspecial(x.strTipCod)))
                     {
-                        var key = new LoteRpcKeyXProdTal(rec.intProdCod, rec.intCodTal);
+                        var key = rec.objProdTalKey;
                         if (dictRef.TryGetValue(key, out decimal dcPrecio) && dcPrecio > 0)
                         {
                             _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod)));
@@ -205,9 +205,9 @@ namespace CostManagement.Dominio.Reglas
                     }
                 }
 
-                if (!objDesbloqueados.Any()) { _objLogger.LogInformation($"[PropPost] Convergencia en pasada {intPasada}."); break; }
+                if (!objDesbloqueados.Any()) { /*_objLogger.LogInformation($"[PropPost] Convergencia en pasada {intPasada}.");*/ break; }
 
-                _objLogger.LogInformation($"[PropPost] Pasada {intPasada}: {objDesbloqueados.Count} desbloqueados.");
+                //_objLogger.LogInformation($"[PropPost] Pasada {intPasada}: {objDesbloqueados.Count} desbloqueados.");
 
                 var depsFilt = dependencias.Where(kv => objDesbloqueados.Contains(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => new HashSet<LoteRpcKeyXSec>(kv.Value.Where(f => objDesbloqueados.Contains(f))));

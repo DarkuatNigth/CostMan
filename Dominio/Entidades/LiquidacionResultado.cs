@@ -1,9 +1,11 @@
 ﻿using CostManagement.Infraestructura.EF_Core;
 using Microsoft.Extensions.DependencyModel;
 using Newtonsoft.Json;
+using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
 using System.Security.Cryptography;
+using static CostManagementService.Dominio.Enums.EnumLiquidacionDto;
 
 namespace CostManagement.Dominio.Entidades
 {
@@ -34,12 +36,12 @@ namespace CostManagement.Dominio.Entidades
         [Column("Masters")]
         public double? dcMasters { get; set; }
 
-        [Column("Fecha Liquidacion")]
+        [Column("Fecha Liq")]
         public DateOnly? dtFechaLiq { get; set; }
 
         [JsonIgnore]
 
-        [Column("hora Liquidacion")]
+        [Column("hora Liq")]
         public int? intHoraLiq { get; set; }
 
         [Column("bod_descri")]
@@ -70,17 +72,20 @@ namespace CostManagement.Dominio.Entidades
         [Column("Turno")]
         public string? strTurno { get; set; }
 
-        [Column("Inicio liquidación")]
+        [Column("Inicio Liq")]
         public DateTime dtInicioLiquidacion { get; set; }
 
-        [Column("Fin liquidación")]
+        [Column("Fin Liq")]
         public DateTime? dtFinLiquidacion { get; set; }
 
-        [Column("Horas Liquidación")]
+        [Column("Horas Liq")]
         public decimal? dcHorasLiquidacion { get; set; }
 
         [Column("Grupo Proveedor")]
         public string? strGrupo { get; set; }
+
+        [Column("TipoCopacking")]
+        public string? strTipoCopacking { get; set; }
 
         [Column("Sub Grupo")]
         public string? strSubGrupo { get; set; }
@@ -97,7 +102,7 @@ namespace CostManagement.Dominio.Entidades
         [Column("Tipo")]
         public string? strProClas05 { get; set; }
 
-        [Column("Tipo X Cola")]
+        [Column("Tipo Cola")]
         public string? strTipCola { get; set; }
 
         [JsonIgnore]
@@ -105,7 +110,7 @@ namespace CostManagement.Dominio.Entidades
         [Column("Planta 2")]
         public string? strPlanta2 { get; set; }
 
-        [Column("Tipo Proc Prod")]
+        [Column("Tipo Proc")]
         public string? strProClas03 { get; set; }
 
         [Column("Descripcion")]
@@ -117,10 +122,18 @@ namespace CostManagement.Dominio.Entidades
         [Column("libras")]
         public double dcLibras { get; set; }
 
-        [Column("PrecioCompra")]
+        [Column("Precio Compra")]
         public double? dcPrecioCompra { get; set; }
 
-        [Column("Certificado")]
+        [Column("Costo Mat Empaque")]
+        public decimal dcCostoMatEmpaque { get; set; }
+
+        //[NotMapped]
+        //[JsonIgnore]
+        [Column("Excedente")]
+        public decimal? dcExcedente { get; set; }
+
+        [Column("Certi")]
         public string? strCertificado { get; set; }
 
         [Column("Premio")]
@@ -130,39 +143,15 @@ namespace CostManagement.Dominio.Entidades
         [Column("Libras Decorado")]
         public decimal? dcLibrasDecorado { get; set; }
 
-        [JsonIgnore]
-        [Column("Libras Retractilado")]
+        //[JsonIgnore]
+        [Column("lbs Retractilado")]
         public decimal? dcLibrasRetractilado { get; set; }
 
-        [Column("C.Copacking")]
+        [Column("Copacking")]
         public decimal? dcCostoCopacking { get; set; }
 
-
-        [Column("Costo Mat Empaque")]
-        public decimal dcCostoMatEmpaque { get; set; }
-
-
-
-        //[Column("Pro Prim Recepcion")]
-        //public decimal? dcRecepcion { get; set; }
-
-
-        //[Column("Pro Prim Clasificacion")]
-        //public decimal? dcClasificacion { get; set; }
-
-
-        //[Column("Pro Prim Codificacion")]
-        //public decimal? dcCodificacion { get; set; }
-
-
-        //[Column("Pro Prim Descabezado")]
-        //public decimal? dcDescabezado { get; set; }
-
-        [Column("Costos Directos")]
-        public ProcesoCostDirectoDto ProcesoCostFijo { get; set; } = new ProcesoCostDirectoDto();
-
-        [Column("Costos Indirectos")]
-        public ProcesoCostIndirectoDto ProcesoCostIndirecto { get; set; } = new ProcesoCostIndirectoDto();
+        [Column("Proceso")]
+        public decimal? dcTarifaProc { get; set; }
 
 
         [Column("Proceso Primario")] // Este nombre será el título del Merge en Excel
@@ -177,20 +166,32 @@ namespace CostManagement.Dominio.Entidades
         [Column("Proceso Congelacion")] // Este nombre será el título del Merge en Excel
         public ProcesoCongelacionDto ProcesoCongelacion { get; set; } = new ProcesoCongelacionDto();
 
-        [Column("Costo Proceso")]
-        public decimal? dcCostTotalProc { get; set; }
+        [Column("Costos Directos")]
+        public ProcesoCostDirectoDto ProcesoCostFijo { get; set; } = new ProcesoCostDirectoDto();
+
+        [Column("Costos Indirectos")]
+        public ProcesoCostIndirectoDto ProcesoCostIndirecto { get; set; } = new ProcesoCostIndirectoDto();
+
+        [Column("Total Mat Prim")]
+        public double? dcTotalDol { get; set; }
 
         //[NotMapped]
         //[JsonIgnore]
-        [Column("Costo Total Mat Empaque")]
+        [Column("Total Mat Empaque")]
         public decimal? dcCostoTotalMatEmp { get; set; }
 
-        [Column("TotalDol")]
-        public double? dcTotalDol { get; set; }
+        [Column("Total Proceso")]
+        public decimal? dcCostTotalProc { get; set; }
+
+        [Column("Total Costos")]
+        public decimal dcTotalDolSum { get; set; }
         //[NotMapped]
         //[JsonIgnore]
         [Column("Costo X Libra")]
         public decimal? dcCostoTotXLibra { get; set; }
+
+        [Column("Validador")]
+        public decimal dcValidador { get; set; }
 
         [JsonIgnore]
         public decimal? dcValorCert { get; set; }
@@ -217,7 +218,7 @@ namespace CostManagement.Dominio.Entidades
         public decimal? dcCostClasificacion { get; set; }
 
         [JsonIgnore]
-        public decimal? dcCostCodificacion { get; set; }
+        public decimal? dcCostCajas { get; set; }
 
         [JsonIgnore]
         public decimal? dcCostDescabezado { get; set; }
@@ -274,9 +275,28 @@ namespace CostManagement.Dominio.Entidades
 
         public decimal? dcRtaCodigo { get; set; }
 
+        [JsonIgnore]
+
+        public decimal dcLotSecuencial { get; set; }
+
+        [NotMapped]
+        [JsonIgnore]
+        public int intCodCopacking { get; set; }
+
+        //Por ahora solo usado con fresco
+        [NotMapped]
+        [JsonIgnore]
+        public LoteFrsKey objLotkey { get; set; }
+
+        //Por ahora solo usado con fresco
+        [NotMapped]
+        [JsonIgnore]
+        public LoteRpcValKey objLotRpc { get; set; }
+
+        #region Constructor
         public LiquidacionResultado() { }
 
-
+       
         public LiquidacionResultado(
             string? tipoLiq, decimal? lote, int? mes, DateTime? fechaLote,
             string? planta, string? proveedor, string? piscina,
@@ -292,11 +312,21 @@ namespace CostManagement.Dominio.Entidades
             DateTime? finLiq, int CodTal, //decimal ?LiqPrecio,
             string? clasifi, string? grupo, string? subGrupo,
             string? proClas01, string? proClas05, string? planta2, string? proClas03,
-            string proClas06, decimal? proCongela, bool? bodEsBrine
+            string proClas06, decimal? proCongela, bool? bodEsBrine, decimal? certPrecio, decimal LotSecuencial, string CodCopacking
+
             )
         {
+            var tmpTipoCopacking = new[]
+            {
+                    new TipoCopacking("0", "NO COPACKING"),
+                    new TipoCopacking("1", "COPACKING EN SONGA"),
+                    new TipoCopacking("2", "COPACKING EN OTRAS CIAS.")
+                }.AsQueryable();
+            var dictTipoCopacking = tmpTipoCopacking
+                .ToDictionary(x => x.Codigo, x => x.Descripcion);
             strTipoLiq = tipoLiq;
             intLote = (int)Convert.ToInt64(lote); // Maneja '20A' sin romper
+            dcLotSecuencial = LotSecuencial;
             intMes = mes;
             dtFechaLote = DateOnly.FromDateTime((DateTime)fechaLote!);
             strPlanta = planta;
@@ -324,7 +354,6 @@ namespace CostManagement.Dominio.Entidades
             dtFinLiquidacion = finLiq;
             intLidCodTal = CodTal;
             strLidClasificadora = clasificadora;
-            //dcLiqPrecio = LiqPrecio;
             strClasificadora = clasifi;
             strGrupo = grupo;
             strSubGrupo = subGrupo;
@@ -359,6 +388,11 @@ namespace CostManagement.Dominio.Entidades
             // Inicializamos valores de precio para el proceso posterior en memoria
             dcPrecioCompra = 0.0000;
             dcTotalDol = 0.0000;
+            InitializePrecioCert(certPrecio);
+            this.strTipoCopacking = dictTipoCopacking.GetValueOrDefault(CodCopacking, "");
+
+            this.intCodCopacking = Convert.ToInt32(CodCopacking);
+            InitializeKeys(enmTipoMerge.Reproceso);
         }
 
         public LiquidacionResultado(
@@ -372,15 +406,21 @@ namespace CostManagement.Dominio.Entidades
     DateTime? finLiq, int CodTal, //decimal ?LiqPrecio,
     string? clasifi, string? grupo, string? subGrupo,
     string? proClas01, string? proClas05, string? planta2, string? proClas03,
-    string proClas06, decimal? proCongela, bool? bodEsBrine, decimal? certPrecio, decimal? PrecioCompra,
-    string tipCola
-            , decimal? RtaCodigo, decimal? TidCodigo, //decimal? LbsCajasRetra, 
-    string BodCodigo,
-    decimal? MedCodigo, string EmbCodigo
+    string proClas06, decimal? proCongela, bool? bodEsBrine, decimal? certPrecio, //decimal? PrecioCompra,
+    string tipCola , decimal? RtaCodigo, decimal? TidCodigo, //decimal? LbsCajasRetra, 
+    string BodCodigo, decimal? MedCodigo, string EmbCodigo, string CodCopacking
     )
         {
             try
             {
+                var tmpTipoCopacking = new[]
+                {
+                    new TipoCopacking("0", "NO COPACKING"),
+                    new TipoCopacking("1", "COPACKING EN SONGA"),
+                    new TipoCopacking("2", "COPACKING EN OTRAS CIAS.")
+                }.AsQueryable();
+                var dictTipoCopacking = tmpTipoCopacking
+                    .ToDictionary(x => x.Codigo, x => x.Descripcion);
                 strTipoLiq = tipoLiq;
                 intLote = (int)Convert.ToInt64(lote); // Maneja '20A' sin romper
                 intMes = mes;
@@ -446,11 +486,13 @@ namespace CostManagement.Dominio.Entidades
                     var diff = finLiq.Value - inicioLiq.Value;
                     dcHorasLiquidacion = Math.Round((decimal)diff.TotalHours, 2);
                 }
-                dcLiqPrecio = PrecioCompra;
+                //dcLiqPrecio = PrecioCompra;
 
-                InitializePrecioCompraAndTotalDol();
+                //InitializePrecioCompraAndTotalDol();
                 InitializePrecioCert(certPrecio);
-
+                this.strTipoCopacking = dictTipoCopacking.GetValueOrDefault(CodCopacking, "");
+                this.intCodCopacking = Convert.ToInt32(CodCopacking);
+                InitializeKeys(enmTipoMerge.Fresco);
             }
             catch (Exception ex)
             {
@@ -458,7 +500,10 @@ namespace CostManagement.Dominio.Entidades
                 Console.WriteLine($"Error al crear LiquidacionResultadoDto: {ex.Message}");
             }
         }
-        private void InitializePrecioCompraAndTotalDol()
+        #endregion
+
+        #region Inicializadores
+        public void InitializePrecioCompraAndTotalDol()
         {
             if (dcLiqPrecio != null)
             {
@@ -468,26 +513,26 @@ namespace CostManagement.Dominio.Entidades
                 double dcValorPrecioCompra = 0.0000;
                 if (strTipPro?.Trim().ToLower() == "cola")
                 {
-                    dcPrecioCompra = Math.Round(precioBase, 4, MidpointRounding.ToZero);
-                    dcValorPrecioCompra = Math.Truncate(dcLibras * (dcPrecioCompra ?? 0) * 100) / 100;
+                    this.dcPrecioCompra = Math.Round(precioBase, 4, MidpointRounding.ToZero);
+                    dcValorPrecioCompra = Math.Truncate(dcLibras * (this.dcPrecioCompra ?? 0) * 100) / 100;
                 }
                 else
                 {
                     // Usamos 2.20462 para mayor precisión en conversión de Libras
                     dcValorPrecioCompra = Math.Truncate(dcLibras * (precioBase / 2.2046) * 100) / 100;
-                    dcPrecioCompra =
+                    this.dcPrecioCompra =
                             Math.Truncate(precioBase / 2.2046 * 10000) / 10000;
                 }
-                dcTotalDol = dcValorPrecioCompra;
+                this.dcTotalDol = dcValorPrecioCompra;
             }
             else
             {
-                dcPrecioCompra = 0;
-                dcTotalDol = Math.Round(dcLibras * (dcPrecioCompra ?? 0), 2, MidpointRounding.ToZero);
+                this.dcPrecioCompra = 0;
+                this.dcTotalDol = Math.Round(dcLibras * (this.dcPrecioCompra ?? 0), 2, MidpointRounding.ToZero);
             }
 
-            dcMasters = Math.Round((double)dcMasters, 2);
-            dcLibras = Math.Round(dcLibras, 2);
+            this.dcMasters = Math.Round((double)dcMasters, 2);
+            this.dcLibras = Math.Round(dcLibras, 2);
         }
 
         private void InitializePrecioCert(decimal? certPrecio)
@@ -497,20 +542,32 @@ namespace CostManagement.Dominio.Entidades
             dcValorCert = dcValCertPrecio;
         }
 
-        private void InitializePrecioCert()
+        private void InitializeKeys(Enum objTipoKey)
         {
-            dcCertificado = Math.Round((decimal)(dcValorCert * (decimal)dcLibras), 2);
+            if (intLote == null || intCodProd == null || intLidCodTal == null)
+                throw new ArgumentNullException($"{nameof(intCodProd)} o {nameof(intLidCodTal)} no pueden ser null.");
+            if (objTipoKey is enmTipoMerge tipoMerge)
+            {
+                switch (tipoMerge)
+                {
+                    case enmTipoMerge.Fresco:
+                        this.objLotkey = new LoteFrsKey(intLote, (int)this.intCodProd, (int)this.intLidCodTal);
+                        break;
+                    case enmTipoMerge.Reproceso:
+                        this.objLotRpc = new LoteRpcValKey((int)this.dcLotSecuencial,(int)this.intLote,(int)this.intCodProd,(int)this.intLidCodTal);
+                        break;
+                }
+            }
         }
+
+        #endregion
+
+        #region Merge de Valores FRS y RPC
         public void MergeValorizacion(LiquidacionResultado valorizado)
         {
             if (valorizado == null) return;
 
-            // Sobreescribimos solo los campos de cálculo/costo que vienen de la tabla valorizada
-            //dcPrecioCompra = valorizado.dcPrecioCompra;
-            //dcTotalDol = valorizado.dcTotalDol;
             dcCostoTotXLibra = valorizado.dcCostoTotXLibra;
-            //if (this.dcLibras == 0) this.dcLibras = valorizado.dcLibras;
-            //if (this.dcMasters == 0 || this.dcMasters == null) this.dcMasters = valorizado.dcMasters;
         }
         public void MergeValorizacion(MatPrimaReproceso objValor)
         {
@@ -531,9 +588,12 @@ namespace CostManagement.Dominio.Entidades
             ProcesoCostIndirecto = objValor.ProcesoCostIndirecto;
             ProcesoCostFijo = objValor.ProcesoCostFijo;
             dcCostoCopacking = objValor.dcCostoCopacking;
+            dcTarifaProc = objValor.dcTarifaProc;
 
         }
+        #endregion
 
+        #region Creacion Diccionarios
         /// <summary>
         /// Genera un diccionario con el costo promedio por Lote, Producto y Talla a partir de una lista de materia prima fresco.
         /// </summary>
@@ -596,6 +656,7 @@ namespace CostManagement.Dominio.Entidades
                                 );
         }
 
+        #endregion
     }
 }
     public class ProcesoPrimarioDto
@@ -606,8 +667,8 @@ namespace CostManagement.Dominio.Entidades
         [Column("Clasificacion")]
         public decimal? dcClasificacion { get; set; }
 
-        [Column("Codificacion")]
-        public decimal? dcCodificacion { get; set; }
+        [Column("Cajas")]
+        public decimal? dcCajas { get; set; }
     }
 
     public class ProcesoPresentacionDto

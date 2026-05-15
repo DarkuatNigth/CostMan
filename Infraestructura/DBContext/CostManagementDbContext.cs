@@ -2,6 +2,8 @@
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Utils;
+using CostManagementService.Dominio.Entidades;
+using CostManagementService.Infraestructura.EF_Core.SONG;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -819,6 +821,10 @@ public partial class CostManagementDbContext : DbContext
         modelBuilder.Entity<RptCongInd>()
                     .HasNoKey()
                     .ToView(null);
+
+        modelBuilder.Entity<LibrasProcesadasDto>().HasNoKey();
+
+        modelBuilder.Entity<TracamAutoResult>().HasNoKey();
 
         OnModelCreatingPartial(modelBuilder);
     }

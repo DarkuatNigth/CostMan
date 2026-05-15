@@ -21,7 +21,7 @@
     }
 
     public class CostoMatEmpProdXCietunDto
-    {// Identificadores de Liquidación y Cierre
+    {
         public int intLiqLote { get; set; }
         public int intCtuNumero { get; set; }
 
@@ -42,6 +42,7 @@
         public float dcLibrasXMasters { get; set; }
         public decimal dcMedCodigo { get; set; }
         public string strEmbCodigo { get; set; }
+        public string strTipCodigo { get; set; }
         public double dbEmbPeso { get; set; }
         public decimal dcCostoDesperdicioBobina { get; set; }
 
@@ -53,6 +54,39 @@
             // Constructor vacío para inicialización manual
         }
         // Constructor para mapeo directo desde el query unificado con manejo de nulos
+        public CostoMatEmpProdXCietunDto(
+            decimal liqLote,
+            int? ctuNumero,
+            string? proCodCor,
+            int? eftItem,
+            string? eftGrupo,
+            double? eftCantidad,
+            float? librasXMasters,
+            decimal? costoDesperdicio,
+            double? embPeso,
+            decimal? medCodigo,
+            string? embCodigo,
+            string TipCodigo/*,
+            string? colCodigo*/)
+        {
+            intLiqLote = (int)liqLote;
+            strTipCodigo = TipCodigo ?? string.Empty;
+            intCtuNumero = ctuNumero ?? 0;
+            strProCodCor = proCodCor ?? string.Empty;
+            intEftItem = eftItem ?? 0;
+            strEftGrupo = eftGrupo ?? string.Empty;
+            dbEftCantidad = eftCantidad ?? 0;
+            dcLibrasXMasters = librasXMasters ?? 0f;
+            dcCostoDesperdicioBobina = costoDesperdicio ?? 0m;
+            dbEmbPeso = embPeso ?? 0;
+            dcMedCodigo = medCodigo ?? 0m;
+            strEmbCodigo = embCodigo?.Trim() ?? string.Empty;
+            //strColCodigo = colCodigo ?? string.Empty;
+
+            // Inicialización de campos de precio por defecto para evitar nulos posteriores
+            strEstadoFicha = "X";
+            dbPrecioUltConsumo = 0;
+        }
         public CostoMatEmpProdXCietunDto(
             decimal liqLote,
             int? ctuNumero,
