@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations.Schema;
+﻿using System.Collections.Concurrent;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CostManagementService.Infraestructura.EF_Core.SONG
 {
@@ -119,5 +120,33 @@ namespace CostManagementService.Infraestructura.EF_Core.SONG
 
         [Column("EMB_FECHAPED")]
         public DateTime? dtEmbFechaped { get; set; } // datetime, null: 1
+
+        public static ConcurrentDictionary<int, string> CrearDicFacturaPorMovimiento(
+                List<RepFactPesoRealResult> lstPesosReales)
+        {
+            return new ConcurrentDictionary<int, string>(
+                lstPesosReales
+                    .Where(x => !string.IsNullOrWhiteSpace(x.strTrcEmbfactura))
+                    .GroupBy(x =>(int) x.intTcdNumero)
+                    .ToDictionary(
+                        grp => grp.Key,
+                        grp => grp.First().strTrcEmbfactura!
+                    )
+            );
+        }
+
+        public static ConcurrentDictionary<int, RepFactPesoRealResult> CrearDicEmbFacPorMovimiento(
+                List<RepFactPesoRealResult> lstPesosReales)
+        {
+            return new ConcurrentDictionary<int, RepFactPesoRealResult>(
+                lstPesosReales
+                    .Where(x => !string.IsNullOrWhiteSpace(x.strTrcEmbfactura))
+                    .GroupBy(x => (int)x.intTcdNumero)
+                    .ToDictionary(
+                        grp => grp.Key,
+                        grp => grp.First()
+                    )
+            );
+        }
     }
 }

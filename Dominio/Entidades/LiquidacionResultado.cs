@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
 using System.Security.Cryptography;
+using static CostManagementService.Dominio.Enums.EnumLiquidacionDto;
 
 namespace CostManagement.Dominio.Entidades
 {
@@ -287,9 +288,15 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         public LoteFrsKey objLotkey { get; set; }
 
+        //Por ahora solo usado con fresco
+        [NotMapped]
+        [JsonIgnore]
+        public LoteRpcValKey objLotRpc { get; set; }
+
+        #region Constructor
         public LiquidacionResultado() { }
 
-
+       
         public LiquidacionResultado(
             string? tipoLiq, decimal? lote, int? mes, DateTime? fechaLote,
             string? planta, string? proveedor, string? piscina,
@@ -385,6 +392,7 @@ namespace CostManagement.Dominio.Entidades
             this.strTipoCopacking = dictTipoCopacking.GetValueOrDefault(CodCopacking, "");
 
             this.intCodCopacking = Convert.ToInt32(CodCopacking);
+            InitializeKeys(enmTipoMerge.Reproceso);
         }
 
         public LiquidacionResultado(
@@ -484,7 +492,7 @@ namespace CostManagement.Dominio.Entidades
                 InitializePrecioCert(certPrecio);
                 this.strTipoCopacking = dictTipoCopacking.GetValueOrDefault(CodCopacking, "");
                 this.intCodCopacking = Convert.ToInt32(CodCopacking);
-                this.objLotkey = new LoteFrsKey( intLote, (int)this.intCodProd, (int)this.intLidCodTal);
+                InitializeKeys(enmTipoMerge.Fresco);
             }
             catch (Exception ex)
             {
@@ -492,6 +500,9 @@ namespace CostManagement.Dominio.Entidades
                 Console.WriteLine($"Error al crear LiquidacionResultadoDto: {ex.Message}");
             }
         }
+        #endregion
+
+        #region Inicializadores
         public void InitializePrecioCompraAndTotalDol()
         {
             if (dcLiqPrecio != null)
@@ -530,6 +541,28 @@ namespace CostManagement.Dominio.Entidades
             dcCertificado = Math.Round(dcValCertPrecio * (decimal)dcLibras, 2);
             dcValorCert = dcValCertPrecio;
         }
+
+        private void InitializeKeys(Enum objTipoKey)
+        {
+            if (intLote == null || intCodProd == null || intLidCodTal == null)
+                throw new ArgumentNullException($"{nameof(intCodProd)} o {nameof(intLidCodTal)} no pueden ser null.");
+            if (objTipoKey is enmTipoMerge tipoMerge)
+            {
+                switch (tipoMerge)
+                {
+                    case enmTipoMerge.Fresco:
+                        this.objLotkey = new LoteFrsKey(intLote, (int)this.intCodProd, (int)this.intLidCodTal);
+                        break;
+                    case enmTipoMerge.Reproceso:
+                        this.objLotRpc = new LoteRpcValKey((int)this.dcLotSecuencial,(int)this.intLote,(int)this.intCodProd,(int)this.intLidCodTal);
+                        break;
+                }
+            }
+        }
+
+        #endregion
+
+        #region Merge de Valores FRS y RPC
         public void MergeValorizacion(LiquidacionResultado valorizado)
         {
             if (valorizado == null) return;
@@ -558,7 +591,9 @@ namespace CostManagement.Dominio.Entidades
             dcTarifaProc = objValor.dcTarifaProc;
 
         }
+        #endregion
 
+        #region Creacion Diccionarios
         /// <summary>
         /// Genera un diccionario con el costo promedio por Lote, Producto y Talla a partir de una lista de materia prima fresco.
         /// </summary>
@@ -621,7 +656,7 @@ namespace CostManagement.Dominio.Entidades
                                 );
         }
 
-
+        #endregion
     }
 }
     public class ProcesoPrimarioDto

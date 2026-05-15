@@ -10,14 +10,17 @@ namespace CostManagement.Dominio.Entidades
     public record LotePrecio(int intLote, int intProdCod, int intTallaCod, string strClase);
     public record PromXProdTal(string ProdCod, int Codtal);
     public record PromLoteXProdTal(int intLote, string strProdCod, int intTallaCod);
+    public record LoteRpcValKey(int intSecuencialLote, int intLoteUnificado, int intCodProd, int intCodTal);
     public record ContextoCostos(
             ConcurrentDictionary<PromLoteXProdTal, decimal> DictPorLoteFrs,
-            ConcurrentDictionary<PromXProdTal, decimal> DictPromFrs,
+            //ConcurrentDictionary<PromXProdTal, decimal> DictPromFrs,
             ConcurrentDictionary<PromLoteXProdTal, decimal> DictPorLoteRpc,
-            ConcurrentDictionary<PromXProdTal, decimal> DictPromRpc,
-            ConcurrentDictionary<PromLoteXProdTal, decimal> DictPorLoteSld
+            //ConcurrentDictionary<PromXProdTal, decimal> DictPromRpc,
+            ConcurrentDictionary<PromLoteXProdTal, decimal> DictPorLoteSld,
+            ConcurrentDictionary<PromXProdTal, decimal> DictPromFrsRpcSld
         );
     public record CtCtblXClaseTipo(string strClase, string strTipo);
+    public record NumDocXFactRef(int intNumDoc, string strFactRef);
     internal sealed class CostosUnitarios
     {
         // Proceso Primario
@@ -379,9 +382,10 @@ GROUP BY
 
 set dateformat ymd;
 WITH tmp1 AS (
-    SELECT trc_numsec AS Numero
+    SELECT trc_numsec AS Numero, concat( rtrim(emb_serie), '-', rtrim(emb_nofactbce )) AS mov_numdoc
     FROM tb_tracamAuto WITH(NOLOCK)
-    WHERE trc_fecha BETWEEN @feini AND @fefin  and trc_tipo in ( 'EX', 'VA', 'CNE')
+    INNER JOIN  tb_progembarque on emb_factura = concat(trc_embfactura,'/', year(trc_fecha)) and emb_estado <> 'N'
+    WHERE trc_fecha BETWEEN @feini AND @fefin  and trc_tipo in ( 'EX', 'VA', 'CNE') and trc_estado = 'AC'
 ),
 tmp_pesoPag AS (
 
@@ -437,6 +441,7 @@ SELECT
     ,'LIBRAS'                          AS UniMedInv         -- varchar(6)    → string
     ,trc_serieFactLocal                                     -- varchar(7)    → string?
     ,CAST(trc_numerFactLocal AS bigint) AS trc_numerFactLocal -- numeric(18,0) → long?
+    ,CAST(mov_numdoc AS VARCHAR(MAX))   AS  mov_numdoc
 FROM tb_tracamAuto WITH(NOLOCK)
   INNER JOIN tmp1               ON trc_numsec = Numero
   INNER JOIN tb_tracadAuto  WITH(NOLOCK) ON tcd_numero   = trc_numsec

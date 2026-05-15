@@ -32,13 +32,13 @@ namespace CostManagement.Infraestructura.Repository.Interface
         #endregion
 
         #region Base Inventario Materia Prima Reproceso
+        Task<List<TbMateriaPrimaReproValorizada>> ObtenerInfoCostoReproceso(DateOnly dtFechaInicio, DateOnly dtFechaFin);
         Task<List<MatPrimaReproceso>> ReporteReproPlanRecibProc(DateOnly dtFechaInicio, DateOnly dtFechaFin);
         Task<List<MatPrimaReproceso>> ReporteReproPlanProc(DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
         Task<ILookup<(string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<string> lstCodProd);
         Task<ILookup<(int LiqLote, string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<int> lstLiqLote);
-        
-
+       
         Task<List<CostoMovArtDto>> CostoUltMovXItemCod(List<string> lstItemCod, DateOnly dtFechaInicio, DateOnly dtFechaFin);
         Task<List<PrecioFrsXMov>> ObtenerPrecioFrsSinTallaXMovCam(List<long> lstLiqLotes/*, bool blUniCola = false*/);
         Task<List<RptCongInd>> ObtenerTipProcXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin);
@@ -70,7 +70,7 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<DateOnly>> ConsultarFechaCorteInv();
         Task<List<DiarioCosto>> ObtenerMovimientosAsync(DateOnly dtFechaInicio,DateOnly dtFechaFin);
 
-
+        Task<List<InventarioVal>> ConsultarInvValBodite(DateOnly dtFechaCorte, string strTipoInv);
         #region Tipo Procesos Productivos
 
         Task<List<TbTiplot>> ConsultarTipoProcesosProductivos();

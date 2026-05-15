@@ -12,6 +12,7 @@ using DocumentFormat.OpenXml.EMMA;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Internal;
+using Microsoft.Extensions.DependencyModel;
 using Microsoft.Extensions.Options;
 using Serilog;
 using System;
@@ -1107,9 +1108,9 @@ namespace CostManagement.Infraestructura.Repository.Services
                          intProdCod = int.Parse(mrpc.MrProCodcor),
                          dbMasters = (double)mrpc.MrMasters,
                          dbLibras = (double)mrpc.MrLibras,
-                         //dbCostoXSecuencial = mrpc.MrCostoUnitario,
                          dcCostoTotXLibra = mrpc.MrCostoUnitario,
                          dbCostoTotal = mrpc.MrCostoTotal,
+                         strAgrupacion = "2. PROCESADO"          // ← AGREGAR (todo en esta tabla es 
                      }
                      ).ToListAsync();
                 return lstMatPrimaReproceso;
@@ -1861,6 +1862,28 @@ namespace CostManagement.Infraestructura.Repository.Services
 
         #region Base Inventario Materia Prima Reproceso
 
+        public async Task<List<TbMateriaPrimaReproValorizada>> ObtenerInfoCostoReproceso(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+            List<TbMateriaPrimaReproValorizada> lstMatReproCost = null;
+            try
+            {
+                using var objContext = await _objCostosFactory.CreateDbContextAsync();
+                objContext.Database.SetCommandTimeout(180);
+                lstMatReproCost = await 
+                    (
+                    from rpc in objContext.TbMateriaPrimaReproValorizada.AsNoTracking()
+                    where rpc.MrFecha >= dtFechaInicio && rpc.MrFecha <= dtFechaFin
+                    select rpc
+                    ).ToListAsync();
+                return lstMatReproCost;
+            }
+            catch (Exception objException)
+            {
+                _objLogger.LogError($"[{nameof(MateriaPrima)}].[{nameof(ObtenerInfoCostoReproceso)}] Ocurrio un error: {objException.Message}");
+                throw;
+            }
+        }
+
         public async Task<List<MatPrimaReproceso>> ReporteReproPlanRecibProc(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
             List<ParamRectrac> lstInfoRetracti;
@@ -1883,50 +1906,6 @@ namespace CostManagement.Infraestructura.Repository.Services
                     .ToDictionary(x => x.Codigo, x => x.Descripcion);
 
                 List<LibrasProcesadasDto> lstLibrasProcesadas = await ObtenerInfoPlanProc(dtFechaInicio, dtFechaFin);
-                //await objContext.Database
-                //        .SqlQueryRaw<LibrasProcesadasDto>(
-                //            new ValueObjects().strLibrasProces,
-                //            new SqlParameter("@feini", dtFechaInicio.ToDateTime(new TimeOnly(00, 00))),
-                //            new SqlParameter("@feifin", dtFechaFin.ToDateTime(new TimeOnly(23, 59)))
-                //        )
-                //        .AsNoTracking()
-                //        .ToListAsync();
-
-                //lstInfoRetracti = await ObtenerInfoRectractiladoXLote(dtFechaInicio, dtFechaFin);
-                //lstLibrasProcesadas.ForEach(item => item.ConstruirKey());
-                //var dictRetra = ParamRectrac.ConstruirDictParamRectracFrs(lstInfoRetracti);
-                //var dictDenominadores = lstLibrasProcesadas
-                //        .Where(r => dictRetra.ContainsKey(r.objRpckey))
-                //        .GroupBy(r => r.objRpckey)
-                //        .ToDictionary(
-                //            g => g.Key,
-                //            g => g.Sum(r => r.Procesado)
-                //        );
-                //foreach (var item in lstLibrasProcesadas)
-                //{
-                //    if (item.LbsCajasRetra  != 0 || item.TipCodigo == "B1") continue; // ya tiene valor, se respeta
-
-                //    if (item.TipCodigo == "CAM" &&
-                //        (item.LotObservacion ?? "").Contains("REQUERIMIENTO DE PRODUCTO ETIQUETEO SOBRANTE AUTOMATICO"))
-                //    {
-                //        _objLogger.LogInformation($"ReporteReproPlanRecibProc Secuencial/Lote {item.LotNumero}/{item.LoteUnificado} |  " +
-                //            $"Etiqueteo : {item.LotObservacion}  | ");
-                //        continue;
-                //    }
-
-                //    if (!dictRetra.TryGetValue(item.objRpckey, out var cola)) continue;
-
-                //    // Peek en lugar de Dequeue — el único elemento no se consume
-                //    if (!cola.TryPeek(out var info)) continue;
-
-                //    if (!dictDenominadores.TryGetValue(item.objRpckey, out double dcTotalLibrasGrupo)) continue;
-
-                //    if (dcTotalLibrasGrupo == 0) continue; // evitar división por cero
-
-                //    decimal dcPorcentaje = (decimal)item.Procesado / (decimal)dcTotalLibrasGrupo;
-                //    item.LbsCajasRetra = Math.Round(dcPorcentaje * info.dcLibrasRetra, 2);
-                //    item.blRetractilado = true;
-                //}
 
                 var lstLibrasProcesadasUni =
                     (from lstUni in lstLibrasProcesadas
@@ -1954,9 +1933,9 @@ namespace CostManagement.Infraestructura.Repository.Services
                      }
                      ).ToList();
 
-                _objLogger.LogInformation($"\nCantidad inicial de lineas lstLibrasProcesadasTemp: {lstLibrasProcesadas.Count}" +
-                    $"\nCantidad de datos agrupados lstLibrasProcesadas: {lstLibrasProcesadas.Count}"
-                    );
+                //_objLogger.LogInformation($"\nCantidad inicial de lineas lstLibrasProcesadasTemp: {lstLibrasProcesadas.Count}" +
+                //    $"\nCantidad de datos agrupados lstLibrasProcesadas: {lstLibrasProcesadas.Count}"
+                //    );
 
                 List<decimal> lstLotNumero = lstLibrasProcesadasUni
                     .Select(x =>(decimal)x.LotNumero)
@@ -2122,9 +2101,9 @@ namespace CostManagement.Infraestructura.Repository.Services
                     )
                     ).ToList();
 
-                _objLogger.LogInformation($"\nCantidad final de lineas lstTotalLibrasRecProc: {lstTotalLibrasRecProc.Count}" +
-                    $"\nCantidad de libras recibidas lstLibrasRecibidas: {lstLibrasRecibidas.Count}"
-                    );
+                //_objLogger.LogInformation($"\nCantidad final de lineas lstTotalLibrasRecProc: {lstTotalLibrasRecProc.Count}" +
+                //    $"\nCantidad de libras recibidas lstLibrasRecibidas: {lstLibrasRecibidas.Count}"
+                //    );
                 return lstTotalLibrasRecProc;
             }
             catch (Exception objException)
@@ -2135,65 +2114,13 @@ namespace CostManagement.Infraestructura.Repository.Services
 
         }
 
-
         public async Task<List<MatPrimaReproceso>> ReporteReproPlanProc(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
             List<MatPrimaReproceso> lstLbsProcesadas;
-            //List<ParamRectrac> lstInfoRetracti;
             try
             {
-                //using var objContext = await _objContextFactory.CreateDbContextAsync();
-                //objContext.Database.SetCommandTimeout(180);
-                //DateTime dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(00, 00));
-                //DateTime dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));
-
                 // ── PASO 1: ejecutar SQL raw y obtener DTOs ──
                 var lstLibrasProcesadas = await ObtenerInfoPlanProc(dtFechaInicio, dtFechaFin);
-                //    await objContext.Database
-                //    .SqlQueryRaw<LibrasProcesadasDto>(
-                //        new ValueObjects().strLibrasProces,
-                //        new SqlParameter("@feini", dtFeInicio),
-                //        new SqlParameter("@feifin", dtFeFin)
-                //    )
-                //    .AsNoTracking()
-                //    .ToListAsync();
-
-                //lstInfoRetracti = await ObtenerInfoRectractiladoXLote(dtFechaInicio, dtFechaFin);
-                //lstLibrasProcesadas.ForEach(item => item.ConstruirKey());
-                //var dictRetra = ParamRectrac.ConstruirDictParamRectracFrs(lstInfoRetracti);
-                //var dictDenominadores = lstLibrasProcesadas
-                //        .Where(r => dictRetra.ContainsKey(r.objRpckey))
-                //        .GroupBy(r => r.objRpckey)
-                //        .ToDictionary(
-                //            g => g.Key,
-                //            g => g.Sum(r => r.Procesado)
-                //        );
-                //foreach (var item in lstLibrasProcesadas)
-                //{
-
-                //    if (item.LbsCajasRetra != 0 || item.TipCodigo == "B1") continue; // ya tiene valor, se respeta
-
-                //    if (item.TipCodigo == "CAM" &&
-                //        (item.LotObservacion ?? "").Contains("REQUERIMIENTO DE PRODUCTO ETIQUETEO SOBRANTE AUTOMATICO"))
-                //    {
-                //        _objLogger.LogInformation($"ReporteReproPlanRecibProc Secuencial/Lote {item.LotNumero}/{item.LoteUnificado} |  " +
-                //            $"Etiqueteo : {item.LotObservacion}  | ");
-                //        continue;
-                //    }
-
-                //    if (!dictRetra.TryGetValue(item.objRpckey, out var cola)) continue;
-
-                //    // Peek en lugar de Dequeue — el único elemento no se consume
-                //    if (!cola.TryPeek(out var info)) continue;
-
-                //    if (!dictDenominadores.TryGetValue(item.objRpckey, out double dcTotalLibrasGrupo)) continue;
-
-                //    if (dcTotalLibrasGrupo == 0) continue; // evitar división por cero
-
-                //    decimal dcPorcentaje = (decimal)item.Procesado / (decimal)dcTotalLibrasGrupo;
-                //    item.LbsCajasRetra = Math.Round(dcPorcentaje * info.dcLibrasRetra, 2);
-                //    item.blRetractilado = true;
-                //}
                 // ── PASO 2: mapear DTO -> MatPrimaReproceso usando el mismo constructor que antes ──
                 lstLbsProcesadas = lstLibrasProcesadas
                     .Select(x => new MatPrimaReproceso(
@@ -2295,8 +2222,8 @@ namespace CostManagement.Infraestructura.Repository.Services
                     if (item.TipCodigo == "CAM" &&
                         (item.LotObservacion ?? "").Contains("REQUERIMIENTO DE PRODUCTO ETIQUETEO SOBRANTE AUTOMATICO"))
                     {
-                        _objLogger.LogInformation($"ReporteReproPlanRecibProc Secuencial/Lote {item.LotNumero}/{item.LoteUnificado} |  " +
-                            $"Etiqueteo : {item.LotObservacion}  | ");
+                        //_objLogger.LogInformation($"ReporteReproPlanRecibProc Secuencial/Lote {item.LotNumero}/{item.LoteUnificado} |  " +
+                        //    $"Etiqueteo : {item.LotObservacion}  | ");
                         continue;
                     }
 
@@ -2670,12 +2597,17 @@ namespace CostManagement.Infraestructura.Repository.Services
         {
             try
             {
+                using var objContext = await _objContextFactory.CreateDbContextAsync();
+                objContext.Database.SetCommandTimeout(180);
                 List<string> lstCodProducto = lstInvVal.Select(obj => obj.strProd.Trim()).Distinct().ToList();
                 List<string> lstTalDescReempla = lstInvVal.Select(obj => obj.strNomTal.Trim().Replace('-', '/')).Distinct().ToList();
                 List<string> lstTalDescOri = lstInvVal.Select(obj => obj.strNomTal.Trim()).Distinct().ToList();
                 lstTalDescReempla = lstTalDescReempla.Select(obj => obj.Replace("MEDIUN", "MEDIUM")).ToList();
                 lstTalDescOri.AddRange(lstTalDescReempla);
-                var lstInfoProd = await _objContext.TbProduc
+
+
+                // ── CONSULTA 1: Info de producto (sin cambios) ──
+                var lstInfoProd = await objContext.TbProduc
                                         .AsNoTracking()
                                         .SelectManyBatchAsync
                                         (
@@ -2683,10 +2615,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                     values: lstCodProducto,
                     selector: filter =>
                         from pro in filter
-                        join ftc in _objContext.TbEmbalaFichaTecnica.AsNoTracking() on pro.ProCodcor equals ftc.EftId.ToString()
-                        join col in _objContext.TbColor.AsNoTracking() on pro.ProClas05 equals col.ColCodigo
-                        join med in _objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
-                        join emb in _objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
+                        join ftc in objContext.TbEmbalaFichaTecnica.AsNoTracking() on pro.ProCodcor equals ftc.EftId.ToString()
+                        join col in objContext.TbColor.AsNoTracking() on pro.ProClas05 equals col.ColCodigo
+                        join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
+                        join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
                         where lstCodProducto.Contains(pro.ProCodcor) && pro.ProClas03 == "PT" && ftc.EftCantidad != 0
                         select new
                         {
@@ -2697,99 +2629,101 @@ namespace CostManagement.Infraestructura.Repository.Services
                             embCodigo = emb.EmbCodigo,
                         }
                     );
+
+                // ── CONSULTA 2: Bodite saldo mes (FUENTE MANDATORIA de talla) ──
                 var lstBoditeXFecha = await (
-                        from bit in _objContext.TbBoditesaldMes.AsNoTracking()
+                        from bit in objContext.TbBoditesaldMes.AsNoTracking()
                         where bit.BitFecha == dtFechaCorte
-                        select new 
+                        select new
                         {
                             TalCodigo = bit.BitCodtal,
                             bit.BitCodbod,
                             bit.BitLote,
                             bit.BitProduc,
-                            BitLibras= Math.Round((decimal)bit.BitLibras,2),
+                            BitLibras = Math.Round((decimal)bit.BitLibras, 2),
                             bit.BitSdocaja
                         }
                         ).ToListAsync();
-                var lookupBodite = lstBoditeXFecha.ToLookup(x => (x.BitProduc.Trim(),(int) x.BitLote, x.BitCodbod.Trim(), x.BitLibras/*, x.BitSdocaja, x.BitLibras*/));
-                var lstCodTalla = await _objContext.TbTallas.AsNoTracking()
-                    .SelectManyBatchAsync(
-                    keySelector: tal => tal.TalDescri,
-                    values: lstTalDescOri, 
-                    selector: filter =>
-                        from tal in filter
-                        where tal.TalEstado == "AC"
-                        select new
-                        {
-                            tal.TalCodigo,
-                            tal.TalTipo,
-                            TalDescri = tal.TalDescri.Trim().Replace('/', '-')
-                        }
+
+                // ── CONSULTA 3: Códigos de talla por descripción (FALLBACK) ──
+                var lstCodTalla = await (from tal in _objContext.TbTallas.AsNoTracking()
+                                         where tal.TalEstado == "AC"
+                                         select new
+                                         {
+                                             tal.TalCodigo,
+                                             tal.TalTipo,
+                                             TalDescri = tal.TalDescri.Trim().Replace('/', '-')
+                                         }
+                                         ).ToListAsync();
+
+                // ════════════════════════════════════════════════════════════════
+                // RESOLUCIÓN DE TALLAS — Estrategia en cascada desde bodite
+                // ════════════════════════════════════════════════════════════════
+
+                // ── PASO 1: Construir diccionarios de talla DESDE BODITE (antes de consumirlos) ──
+
+                // Nivel 1 — Clave específica: (Prod, Lote, Bodega, Libras) → talla(s)
+                var dicTallaPorLibras = lstBoditeXFecha
+                    .GroupBy(b => (
+                        Prod: b.BitProduc.Trim(),
+                        Lote: (int)b.BitLote,
+                        Bod: b.BitCodbod.Trim(),
+                        Libras: b.BitLibras
+                    ))
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Select(x => (short)x.TalCodigo).Distinct().ToList()
                     );
 
-                var dicBodite = new Dictionary<(string Prod, int Lote, string Bodega), Queue<short>>();
-                var dicTallaAsignada = new Dictionary<(string Prod, int Lote, string CodigoTalla), short>();
-                var gruposExcel = lstInvVal
-                        .GroupBy(x => (
-                            Prod: x.strProd.Trim(),
-                            Lote: x.intLote,
-                            CodigoTalla: x.strCodigoTalla.Trim()
-                        ));
+                // Nivel 2 — Clave media: (Prod, Lote, Bodega) → talla(s) distintas
+                var dicTallaPorBodega = lstBoditeXFecha
+                    .GroupBy(b => (
+                        Prod: b.BitProduc.Trim(),
+                        Lote: (int)b.BitLote,
+                        Bod: b.BitCodbod.Trim()
+                    ))
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Select(x => (short)x.TalCodigo).Distinct().ToList()
+                    );
 
-                foreach (var grupo in gruposExcel)
+                // Nivel 3 — Clave amplia: (Prod, Lote) → talla(s) distintas
+                var dicTallaPorLote = lstBoditeXFecha
+                    .GroupBy(b => (
+                        Prod: b.BitProduc.Trim(),
+                        Lote: (int)b.BitLote
+                    ))
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Select(x => (short)x.TalCodigo).Distinct().ToList()
+                    );
+
+                // ── PASO 2: Construir diccionarios de talla por descripción (FALLBACK) ──
+
+                // 2a. Diccionario CON TalTipo (match estricto)
+                var dicTallaPorDescripcion = new Dictionary<(string Descri, string Tipo), short>();
+                foreach (var t in lstCodTalla)
                 {
-                    short tallaEncontrada = 0;
-
-                    // Intentar encontrar la talla en Bodite probando cada fila del grupo
-                    foreach (var fila in grupo)
-                    {
-                        var keyBodite = (
-                            fila.strProd.Trim(),
-                            fila.intLote,
-                            fila.strCam.Trim()
-                        );
-
-                        if (dicBodite.TryGetValue(keyBodite, out var cola) && cola.Count > 0)
-                        {
-                            tallaEncontrada = cola.Dequeue(); // ← consume UNA sola vez por grupo
-                            break;
-                        }
-                    }
-
-                    // Fallback si Bodite no resolvió
-                    if (tallaEncontrada == 0)
-                    {
-                        var primeraFila = grupo.First();
-                        var objFallback = lstCodTalla.FirstOrDefault(t =>
-                            t.TalDescri == primeraFila.strNomTal &&
-                            t.TalTipo == primeraFila.strClas01);
-
-                        if (objFallback != null)
-                            tallaEncontrada = (short)objFallback.TalCodigo;
-                        //else
-                        //    _objLogger.LogInformation(
-                        //        $"Fallback fallido - Lote {primeraFila.intLote} " +
-                        //        $"CodigoTalla: {primeraFila.strCodigoTalla} " +
-                        //        $"Prod: {primeraFila.strProd}");
-                    }
-
-                    dicTallaAsignada[grupo.Key] = tallaEncontrada;
+                    var key = (Descri: t.TalDescri.Trim(), Tipo: t.TalTipo.Trim());
+                    if (!dicTallaPorDescripcion.ContainsKey(key))
+                        dicTallaPorDescripcion[key] = (short)t.TalCodigo;
                 }
 
-                foreach (var bit in lstBoditeXFecha)
+                // 2b. Diccionario SIN TalTipo (match relajado — último recurso)
+                // Para casos donde TalTipo en TbTallas no coincide con strClas01 del Excel
+                // Ejemplo: "MEDIUM" existe con TalTipo="CC" pero el Excel tiene strClas01="SC"
+                var dicTallaSoloDescripcion = new Dictionary<string, short>();
+                foreach (var t in lstCodTalla)
                 {
-                    var key = (bit.BitProduc.Trim(), (int)bit.BitLote, bit.BitCodbod.Trim());
-
-                    if (!dicBodite.ContainsKey(key))
-                    {
-                        dicBodite[key] = new Queue<short>();
-                    }
-                    // Encolamos el código de talla (asegurando el tipo short)
-                    dicBodite[key].Enqueue((short)bit.TalCodigo);
+                    var descri = t.TalDescri.Trim();
+                    if (!dicTallaSoloDescripcion.ContainsKey(descri))
+                        dicTallaSoloDescripcion[descri] = (short)t.TalCodigo;
                 }
 
+                // ── PASO 3: Asignar datos a cada fila del Excel ──
                 foreach (var objInvVal in lstInvVal)
                 {
-                    // Asignación de InfoProd (sin cambios)
+                    // === Asignación de InfoProd (sin cambios) ===
                     var objInfoProd = lstInfoProd.FirstOrDefault(obj => obj.prodCod == objInvVal.strProd);
                     if (objInfoProd != null)
                     {
@@ -2806,36 +2740,130 @@ namespace CostManagement.Infraestructura.Repository.Services
                         objInvVal.strEmbCodigo = "";
                     }
 
-                    // Asignación de talla desde el diccionario pre-calculado
-                    var keyGrupo = (
-                        Prod: objInvVal.strProd.Trim(),
-                        Lote: objInvVal.intLote,
-                        CodigoTalla: objInvVal.strCodigoTalla.Trim()
-                    );
+                    // === Resolución de talla — Cascada de 8 prioridades ===
+                    short tallaResuelta = 0;
+                    var prod = objInvVal.strProd.Trim();
+                    var lote = objInvVal.intLote;
+                    var bod = objInvVal.strCam.Trim();
+                    var libras = Math.Round((decimal)objInvVal.dcLibras, 2);
 
-                    objInvVal.stTalCodigo = dicTallaAsignada.TryGetValue(keyGrupo, out var talla)
-                        ? talla
-                        : (short)0;
-                    short? stTalCodigo = null;
-                    if (objInvVal.strNomTal.Replace('/', '-') == "21-25")
+                    // ── BODITE (fuente mandatoria) ──
+
+                    // PRIORIDAD 1: Match exacto por (Prod, Lote, Bodega, Libras)
+                    if (dicTallaPorLibras.TryGetValue((prod, lote, bod, libras), out var tallasNivel1)
+                        && tallasNivel1.Count == 1)
                     {
-                        stTalCodigo = (short?)lstCodTalla.FirstOrDefault(obj => obj.TalDescri.Replace('-', '/') == "21/25" && obj.TalTipo.Trim() == objInvVal.strClas01.Trim())?.TalCodigo;
-                    }
-                    else if (objInvVal.strNomTal.Replace('N', 'M') == "MEDIUM")
-                    {
-                        stTalCodigo = (short?)lstCodTalla.FirstOrDefault(obj => obj.TalDescri.Replace('N', 'M') == "MEDIUM" && obj.TalTipo.Trim() == objInvVal.strClas01.Trim())?.TalCodigo;
+                        tallaResuelta = tallasNivel1[0];
                     }
 
-                    if (stTalCodigo != null)
+                    // PRIORIDAD 2: Talla única por (Prod, Lote, Bodega)
+                    if (tallaResuelta == 0
+                        && dicTallaPorBodega.TryGetValue((prod, lote, bod), out var tallasNivel2)
+                        && tallasNivel2.Count == 1)
                     {
-                        objInvVal.stTalCodigo = (short)stTalCodigo;
-                        //_objLogger.LogInformation(
-                        //    $"Fallback {objInvVal.strNomTal} - Lote {objInvVal.intLote} " +
-                        //    $"CodigoTalla: {objInvVal.strNomTal} " +
-                        //    $"CodigoTalla: {objInvVal.stTalCodigo} " +
-                        //    $"Prod: {objInvVal.strProd}");
+                        tallaResuelta = tallasNivel2[0];
                     }
+
+                    // PRIORIDAD 3: Talla única por (Prod, Lote)
+                    if (tallaResuelta == 0
+                        && dicTallaPorLote.TryGetValue((prod, lote), out var tallasNivel3)
+                        && tallasNivel3.Count == 1)
+                    {
+                        tallaResuelta = tallasNivel3[0];
+                    }
+
+                    // ── TEXT MATCHING (fallback cuando bodite no resuelve) ──
+
+                    // PRIORIDAD 4: Match directo de descripción + TalTipo
+                    if (tallaResuelta == 0)
+                    {
+                        var nomTalExcel = objInvVal.strNomTal.Trim();
+                        var keyDirecta = (Descri: nomTalExcel, Tipo: objInvVal.strClas01.Trim());
+                        if (dicTallaPorDescripcion.TryGetValue(keyDirecta, out var tallaDirecta))
+                        {
+                            tallaResuelta = tallaDirecta;
+                        }
+                    }
+
+                    // PRIORIDAD 5: Normalización avanzada + TalTipo
+                    // "5-09"→"5-9", "MEDIUN"→"MEDIUM"
+                    if (tallaResuelta == 0)
+                    {
+                        var nomTalNormalizado = InvValDataDto.NormalizarTalla(objInvVal.strNomTal.Trim());
+                        var keyNorm = (Descri: nomTalNormalizado, Tipo: objInvVal.strClas01.Trim());
+                        if (dicTallaPorDescripcion.TryGetValue(keyNorm, out var tallaNorm))
+                        {
+                            tallaResuelta = tallaNorm;
+                        }
+                    }
+
+                    // PRIORIDAD 6: Cruce inverso bodite + descripción
+                    // Cuando bodite tiene múltiples tallas, matchear descripción contra las disponibles
+                    if (tallaResuelta == 0
+                        && dicTallaPorBodega.TryGetValue((prod, lote, bod), out var tallasDisponibles)
+                        && tallasDisponibles.Count > 1)
+                    {
+                        var nomTalNorm = InvValDataDto.NormalizarTalla(objInvVal.strNomTal.Trim());
+                        foreach (var codTalla in tallasDisponibles)
+                        {
+                            var tallaInfo = lstCodTalla.FirstOrDefault(t =>
+                                (short)t.TalCodigo == codTalla
+                                && t.TalTipo.Trim() == objInvVal.strClas01.Trim());
+
+                            if (tallaInfo != null && tallaInfo.TalDescri.Trim() == nomTalNorm)
+                            {
+                                tallaResuelta = codTalla;
+                                break;
+                            }
+                        }
+                    }
+
+                    // PRIORIDAD 7: Match relajado — SIN restricción de TalTipo
+                    // Para cuando TbTallas tiene la talla pero con TalTipo distinto al strClas01 del Excel
+                    // Ejemplo: "MEDIUM" existe con TalTipo="CC" pero Excel tiene strClas01="SC"
+                    if (tallaResuelta == 0)
+                    {
+                        var nomTalNorm = InvValDataDto.NormalizarTalla(objInvVal.strNomTal.Trim());
+
+                        // Intentar primero con descripción normalizada
+                        if (dicTallaSoloDescripcion.TryGetValue(nomTalNorm, out var tallaRelajada))
+                        {
+                            tallaResuelta = tallaRelajada;
+                        }
+                        // Intentar con descripción original (sin normalizar)
+                        else if (dicTallaSoloDescripcion.TryGetValue(objInvVal.strNomTal.Trim(), out var tallaOri))
+                        {
+                            tallaResuelta = tallaOri;
+                        }
+                    }
+
+                    // PRIORIDAD 8: Cruce inverso bodite SIN restricción de TalTipo
+                    // Último intento: bodite con múltiples tallas, matchear solo por descripción
+                    if (tallaResuelta == 0
+                        && dicTallaPorBodega.TryGetValue((prod, lote, bod), out var tallasUltimoIntento)
+                        && tallasUltimoIntento.Count > 1)
+                    {
+                        var nomTalNorm = InvValDataDto.NormalizarTalla(objInvVal.strNomTal.Trim());
+                        foreach (var codTalla in tallasUltimoIntento)
+                        {
+                            // Sin filtro de TalTipo
+                            var tallaInfo = lstCodTalla.FirstOrDefault(t =>
+                                (short)t.TalCodigo == codTalla);
+
+                            if (tallaInfo != null && tallaInfo.TalDescri.Trim() == nomTalNorm)
+                            {
+                                tallaResuelta = codTalla;
+                                break;
+                            }
+                        }
+                    }
+
+                    objInvVal.stTalCodigo = tallaResuelta;
                 }
+                //var obj = lstInvVal.Where(x => x.stTalCodigo == 0).ToList();
+                //_objLogger.LogWarning(
+                //    $"[ObtenerDatosProd] Talla no resuelta - " +
+                //    $"Cantidad de tallas en 0 : {obj.Count}");
 
             }
             catch (Exception objException)
@@ -2931,7 +2959,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                 List<TbMateriaPrimaSaldo> lstMatPrimaFechaCorte = lstInvVal
                     .Select(objInvVal => new TbMateriaPrimaSaldo
                     {
-                        MpsEmpCodigo = (short)objInvVal.stEmpCodigo,
+                        MpsEmpCodigo = (short)1,
                         MpsTipo = "I",
                         MpsTipoLote = objInvVal.strTipoLote,
                         MpsFecha = objInvVal.dtFecha,
@@ -2969,6 +2997,206 @@ namespace CostManagement.Infraestructura.Repository.Services
             }
         }
 
+        public async Task<List<InventarioVal>> ConsultarInvValBodite(DateOnly dtFechaCorte, string strTipoInv)
+        {
+            List<InventarioVal> lstResultado;
+            try
+            {
+                await using var ctx = await _objContextFactory.CreateDbContextAsync();
+                ctx.Database.SetCommandTimeout(180);
+
+                if (strTipoInv == "I")
+                {
+                    // ══════════════════════════════════════════════════════════════
+                    // RUTA INICIAL: TbMateriaPrimaSaldo (inventario subido por Excel)
+                    // Necesita enriquecimiento posterior porque solo guarda códigos
+                    // ══════════════════════════════════════════════════════════════
+                    await using var objCostosCtx = await _objCostosFactory.CreateDbContextAsync();
+                    objCostosCtx.Database.SetCommandTimeout(180);
+
+                    lstResultado = await (
+                        from mts in objCostosCtx.TbMateriaPrimaSaldo.AsNoTracking()
+                        where mts.MpsTipo == "I"
+                           && mts.MpsFechaCorte == dtFechaCorte
+                           && mts.MpsEstado == "AC"
+                        select new InventarioVal
+                        {
+                            strTipo = "I",
+                            strCodTip = "INICIAL",
+                            intLote = (int)mts.MpsRloNumero,
+                            dtFechaMov = (DateTime)mts.MpsFecha,
+                            stTalCodigo = (short)mts.MpsTalCodigo,
+                            strProCodcor = mts.MpsProCodcor.Trim(),
+                            strEmbCodigo = mts.MpsEmbCodigo,
+                            strCodBod = mts.MpsBodCodigo,
+                            intMedCodigo = (int)mts.MpsMedCodigo,
+                            dcLibras = (decimal)mts.MpsLibras,
+                            dcMasters = (decimal)mts.MpsMasters,
+                            dcCostoTot = (decimal)mts.MpsCostoTotal,
+                            dcCostoUnit = (decimal)mts.MpsCostoUnitario
+                        }
+                    ).ToListAsync();
+
+                    // ── Enriquecimiento: TbProduc + TbProces + TbTallas ──
+                    if (lstResultado.Any())
+                    {
+                        List<string> lstProdCod = lstResultado
+                            .Select(obj => obj.strProCodcor).Distinct().ToList();
+                        List<decimal> lstCodTal = lstResultado
+                            .Select(obj => Convert.ToDecimal(obj.stTalCodigo)).Distinct().ToList();
+
+                        var lstInfoProdCod = await ctx.TbProduc.AsNoTracking()
+                            .SelectManyBatchAsync(
+                                keySelector: pro => pro.ProCodcor,
+                                values: lstProdCod,
+                                selector: filtered =>
+                                    from pro in filtered
+                                    join pres in ctx.TbProces.AsNoTracking()
+                                        on pro.ProClas06 equals pres.ProCodigo
+                                    select new
+                                    {
+                                        ProCodcor = pro.ProCodcor.Trim(),
+                                        pro.ProDesesp,
+                                        pro.ProClas01,
+                                        pro.ProClas02,
+                                        pro.ProClas05,
+                                        pro.ProCodigo,
+                                        pres.ProDescri
+                                    }
+                            );
+
+                        var lstInfoCodTal = await ctx.TbTallas.AsNoTracking()
+                            .SelectManyBatchAsync(
+                                keySelector: tal => tal.TalCodigo,
+                                values: lstCodTal,
+                                selector: filtered =>
+                                    from tal in filtered
+                                    select new
+                                    {
+                                        tal.TalCodigo,
+                                        tal.TalDescri
+                                    }
+                            );
+
+                        foreach (var sal in lstResultado)
+                        {
+                            var objProduc = lstInfoProdCod
+                                .FirstOrDefault(obj => obj.ProCodcor == sal.strProCodcor);
+                            var objTalla = lstInfoCodTal
+                                .FirstOrDefault(obj => obj.TalCodigo == (decimal)sal.stTalCodigo);
+
+                            if (objProduc != null)
+                            {
+                                CtCtblXClaseTipo objKey = new CtCtblXClaseTipo(
+                                    objProduc.ProClas05, objProduc.ProClas02);
+
+                                sal.strProDesesp = objProduc.ProDesesp;
+                                sal.strProClas01 = objProduc.ProClas01;
+                                sal.strProClas05 = objProduc.ProClas05;
+                                sal.strProdDescri = objProduc.ProDescri;
+                                sal.strProCod = objProduc.ProCodigo;
+                                sal.lgCuentaContable = InventarioVal._mapaDeCuentas
+                                    .GetValueOrDefault(objKey, 000000);
+                                sal.objLotePromProdTalKey  = new PromXProdTal(sal.strProCodcor.Trim(),(int)sal.stTalCodigo);
+
+                            }
+
+                            if (objTalla != null)
+                            {
+                                sal.strTalDescri = objTalla.TalDescri;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // ══════════════════════════════════════════════════════════════
+                    // RUTA FINAL: TbBoditesaldMes con joins inline
+                    // NO necesita enriquecimiento — todo se vincula directamente
+                    // ══════════════════════════════════════════════════════════════
+                    string strFechaCorte = dtFechaCorte.ToString("yyyy/MM/dd");
+
+                    // Nota: lgCuentaContable se calcula después del ToListAsync
+                    // porque _mapaDeCuentas.GetValueOrDefault() no se traduce a SQL.
+                    var lstBoditeRaw = await (
+                        from bit in ctx.TbBoditesaldMes.AsNoTracking()
+                        join pro in ctx.TbProduc.AsNoTracking()
+                            on bit.BitProduc equals pro.ProCodcor
+                        join pres in ctx.TbProces.AsNoTracking()
+                            on pro.ProClas06 equals pres.ProCodigo
+                        join tal in ctx.TbTallas.AsNoTracking()
+                            on bit.BitCodtal equals tal.TalCodigo
+                        join med in ctx.TbMedida.AsNoTracking()
+                            on pro.ProUnimed equals med.MedCodigo
+                        join emb in ctx.TbEmbala.AsNoTracking()
+                            on pro.ProEmbala equals emb.EmbCodigo
+                        where bit.BitFecha == strFechaCorte
+                           && tal.TalEstado == "AC"
+                        select new
+                        {
+                            bit.BitLote,
+                            bit.BitCodtal,
+                            ProCodcor = pro.ProCodcor.Trim(),
+                            pro.ProDesesp,
+                            pro.ProClas01,
+                            pro.ProClas02,
+                            pro.ProClas05,
+                            pro.ProCodigo,
+                            ProcDescri = pres.ProDescri,
+                            TalDescri = tal.TalDescri.Trim(),
+                            EmbCodigo = emb.EmbCodigo,
+                            bit.BitCodbod,
+                            MedCodigo = (int)med.MedCodigo,
+                            BitLibras = Math.Round((decimal)bit.BitLibras, 2),
+                            bit.BitSdocaja,
+                            bit.BitCostot,
+                            bit.BitCosprm
+                        }
+                    ).Where(x => Math.Abs(x.BitLibras) > 0.0001m)
+                     .ToListAsync();
+
+                    // Mapeo a InventarioVal + CuentaContable (en memoria, no traducible a SQL)
+                    lstResultado = lstBoditeRaw
+                        .Select(x =>
+                        {
+                            var objKey = new CtCtblXClaseTipo(x.ProClas05, x.ProClas02);
+                            return new InventarioVal
+                            {
+                                strTipo = "F",
+                                strCodTip = "FINAL",
+                                intLote = (int)x.BitLote,
+                                dtFechaMov = DateTime.Now,
+                                stTalCodigo = (short)x.BitCodtal,
+                                strProCodcor = x.ProCodcor,
+                                strProDesesp = x.ProDesesp,
+                                strProClas01 = x.ProClas01,
+                                strProClas05 = x.ProClas05,
+                                strProdDescri = x.ProcDescri,
+                                strProCod = x.ProCodigo,
+                                strTalDescri = x.TalDescri,
+                                strEmbCodigo = x.EmbCodigo,
+                                strCodBod = x.BitCodbod,
+                                intMedCodigo = x.MedCodigo,
+                                dcLibras = x.BitLibras,
+                                dcMasters = x.BitSdocaja,
+                                dcCostoTot = x.BitCostot,
+                                dcCostoUnit = x.BitCosprm,
+                                lgCuentaContable = InventarioVal._mapaDeCuentas
+                                    .GetValueOrDefault(objKey, 000000),
+                                objLotePromProdTalKey = new PromXProdTal(x.ProCodcor.Trim(), (int)x.BitCodtal)
+                            };
+                        }).ToList();
+                }
+
+                return lstResultado;
+            }
+            catch (Exception objException)
+            {
+                _objLogger.LogError(
+                    $"[MateriaPrima].[ConsultarInvValBodite] Ocurrio un error: {objException.Message}");
+                throw;
+            }
+        }
         #endregion
 
         #region Materia Prima por movimiento inventario
@@ -3025,8 +3253,8 @@ namespace CostManagement.Infraestructura.Repository.Services
                     where mts.MpsTipo == "I"
                     select new InventarioVal
                     {
-                        //strTipo = "I",
-                        strCodTip = "IVINI",
+                        strTipo = "I",
+                        strCodTip = "INICIAL",
                         //strDescripcion = "1.IN",
                         intLote = (int)mts.MpsRloNumero,
                         //strProClas01 = g.Key.ProClas01,
@@ -3091,6 +3319,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         sal.strProdDescri = objProduc.ProDescri;
                         sal.strProCod = objProduc.ProCodigo;
                         sal.lgCuentaContable = InventarioVal._mapaDeCuentas.GetValueOrDefault(objKey, 000000);
+                        sal.objLotePromProdTalKey = new PromXProdTal(sal.strProCodcor.Trim(), (int)sal.stTalCodigo);
                     }
                     if (objTalla != null)
                     {
@@ -3225,6 +3454,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                         pro.ProDesesp,
                                         pro.ProClas01,
                                         pro.ProClas05,
+                                        pro.ProClas02,
                                         pres.ProCodigo,
                                         pres.ProDescri
                                     }
@@ -3249,6 +3479,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                     {
                         sal.strProDesesp = objProduc.ProDesesp;
                         sal.strProClas01 = objProduc.ProClas01;
+                        sal.strProClas02 = objProduc.ProClas02;
                         sal.strProClas05 = objProduc.ProClas05;
                         sal.strProdDescri = objProduc.ProDescri;
                         sal.strProCod = objProduc.ProCodigo;
@@ -3304,6 +3535,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         pro.ProClas01,
                         liq.LiqFecha,
                         pro.ProClas05,
+                        pro.ProClas02,
                         tal.TalDescri,
                         tal.TalCodigo,
                         pro.ProCodcor,
@@ -3323,6 +3555,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         dtFechaMov = g.Key.LiqFecha,
                         strProClas01 = g.Key.ProClas01,
                         strProClas05 = g.Key.ProClas05,
+                        strProClas02 = g.Key.ProClas02,
                         strTalDescri = g.Key.TalDescri,
                         stTalCodigo = (short)g.Key.TalCodigo,
                         strProCodcor = g.Key.ProCodcor.Trim(),
@@ -3383,6 +3616,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         liq.LiqFecha,
                         pro.ProClas01,
                         pro.ProClas05,
+                        pro.ProClas02,
                         tal.TalDescri,
                         tal.TalCodigo,
                         pro.ProCodcor,
@@ -3402,6 +3636,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         dtFechaMov = g.Key.LiqFecha,
                         strProClas01 = g.Key.ProClas01,
                         strProClas05 = g.Key.ProClas05,
+                        strProClas02 = g.Key.ProClas02,
                         strTalDescri = g.Key.TalDescri,
                         stTalCodigo = (short)g.Key.TalCodigo,
                         strProCodcor = g.Key.ProCodcor.Trim(),
@@ -3461,6 +3696,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         trc.TrcFecha,
                         pro.ProClas01,
                         pro.ProClas05,
+                        pro.ProClas02,
                         tal.TalDescri,
                         tal.TalCodigo,
                         pro.ProCodcor,
@@ -3480,6 +3716,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         dtFechaMov = g.Key.TrcFecha,
                         strProClas01 = g.Key.ProClas01,
                         strProClas05 = g.Key.ProClas05,
+                        strProClas02 = g.Key.ProClas02,
                         strTalDescri = g.Key.TalDescri,
                         stTalCodigo = (short)g.Key.TalCodigo,
                         strProCodcor = g.Key.ProCodcor.Trim(),
@@ -3543,6 +3780,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         trc.TrcFecha,
                         trc.TrcCodcam,
                         pro.ProClas01,
+                        pro.ProClas02,
                         pro.ProClas05,
                         tal.TalDescri,
                         tal.TalCodigo,
@@ -3563,6 +3801,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         dtFechaMov = g.Key.TrcFecha,
                         strProClas01 = g.Key.ProClas01,
                         strProClas05 = g.Key.ProClas05,
+                        strProClas02 = g.Key.ProClas02,
                         strTalDescri = g.Key.TalDescri,
                         stTalCodigo = (short)g.Key.TalCodigo,
                         strProCodcor = g.Key.ProCodcor.Trim(),
@@ -3623,6 +3862,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         trc.TrcCodcam,
                         pro.ProClas01,
                         pro.ProClas05,
+                        pro.ProClas02,
                         tal.TalDescri,
                         tal.TalCodigo,
                         pro.ProCodcor,
@@ -3642,6 +3882,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         dtFechaMov = g.Key.TrcFecha,
                         strProClas01 = g.Key.ProClas01,
                         strProClas05 = g.Key.ProClas05,
+                        strProClas02 = g.Key.ProClas02,
                         strTalDescri = g.Key.TalDescri,
                         stTalCodigo = (short)g.Key.TalCodigo,
                         strProCodcor = g.Key.ProCodcor.Trim(),
@@ -3700,6 +3941,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         lot.LotCodbod,
                         pro.ProClas01,
                         pro.ProClas05,
+                        pro.ProClas02,
                         tal.TalDescri,
                         tal.TalCodigo,
                         pro.ProCodcor,
@@ -3719,6 +3961,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         dtFechaMov = g.Key.LotFecha ?? DateTime.Now,
                         strProClas01 = g.Key.ProClas01,
                         strProClas05 = g.Key.ProClas05,
+                        strProClas02 = g.Key.ProClas02,
                         strTalDescri = g.Key.TalDescri,
                         stTalCodigo = (short)g.Key.TalCodigo,
                         strProCodcor = g.Key.ProCodcor.Trim(),

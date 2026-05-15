@@ -1,5 +1,8 @@
 ﻿using CostManagement.Aplicación.DTos;
 using CostManagement.Dominio.Entidades;
+using CostManagementService.Aplicacion.DTos;
+using CostManagementService.Infraestructura.EF_Core.SONG;
+using System.Collections.Concurrent;
 
 namespace CostManagement.Dominio.Reglas
 {
@@ -146,15 +149,37 @@ namespace CostManagement.Dominio.Reglas
                 {
                     var obj = objkey;
                 }
-                if (objLiq.strAgrupacion != "2. PROCESADO" || objLiq.dbLibras <= 0 || objLiq.dcCostoTotXLibra != null) continue;
+                // ── Guardia: solo queda agrupación y libras, ya NO se salta por dcCostoTotXLibra ──
+                if (objLiq.strAgrupacion != "2. PROCESADO" || objLiq.dbLibras <= 0) continue;
 
+                // ── Cálculos que SIEMPRE se ejecutan ──
                 dcCostTotalProc = (objLiq.dcCostTotalProc ?? 0m);
                 dcCostoTotalMatEmp = (objLiq.dcCostoTotalMatEmp ?? 0m);
                 dcTotalDol = (decimal)objLiq.dbCostoTotal;
-                dcCostoProc = (objLiq.dcTarifaProc ?? 0m); 
+                dcCostoProc = (objLiq.dcTarifaProc ?? 0m);
                 objLiq.dcTotalDolSum = dcCostTotalProc + dcCostoTotalMatEmp + dcTotalDol + dcCostoProc;
-                objLiq.dcCostoTotXLibra = Math.Truncate((objLiq.dcTotalDolSum / (decimal)objLiq.dbLibras) * 100m) / 100m;
-                objLiq.dcValidador = (decimal)objLiq.dcCostoTotXLibra - (decimal)objLiq.dbCostoXSecuencial; 
+
+                // ── BIFURCACIÓN ──
+                if (objLiq.dcCostoTotXLibra == null)
+                {
+                    // RAMA A: Sin valor en base → calcular dcCostoTotXLibra normalmente
+                    objLiq.dcCostoTotXLibra = Math.Truncate(
+                        (objLiq.dcTotalDolSum / (decimal)objLiq.dbLibras) * 100m) / 100m;
+                    // dbCostoXSecuencial conserva el valor que le asignó el grafo/prorrateo
+                }
+                else if (objLiq.dbCostoXSecuencial == 0)
+                {
+                    // RAMA B: dcCostoTotXLibra vino desde base Y el grafo no corrió
+                    //         (ruta intermediaria liviana)
+                    //         → asignar dbCostoXSecuencial desde el valor de base
+                    objLiq.dbCostoXSecuencial = (decimal)objLiq.dcCostoTotXLibra;
+                }
+                // RAMA C (implícita): dcCostoTotXLibra != null Y dbCostoXSecuencial != 0
+                //   → ambos valores existen (base + grafo), se conservan tal cual
+                //   → el validador mostrará la diferencia real
+
+                // ── Validador SIEMPRE se calcula ──
+                objLiq.dcValidador = (decimal)objLiq.dcCostoTotXLibra - (decimal)objLiq.dbCostoXSecuencial;
             }
         }
 
@@ -254,16 +279,16 @@ namespace CostManagement.Dominio.Reglas
         {
             var objContext = new ContextoCostos(
                 DictPorLoteFrs: DiarioCosto.ConstruirDictPorLoteFrs(lstFrsValorizado),
-                DictPromFrs: DiarioCosto.ConstruirDictPromedioFrs(lstFrsValorizado),
+               //DictPromFrs: DiarioCosto.ConstruirDictPromedioFrs(lstFrsValorizado),
                 DictPorLoteRpc: DiarioCosto.ConstruirDictPorLoteRpc(lstRpcValorizado),
-                DictPromRpc: DiarioCosto.ConstruirDictPromedioRpc(lstRpcValorizado),
-                DictPorLoteSld: DiarioCosto.ConstruirDictPorLoteSld(lstDiarioCosto)
+                //DictPromRpc: DiarioCosto.ConstruirDictPromedioRpc(lstRpcValorizado),
+                DictPorLoteSld: DiarioCosto.ConstruirDictPorLoteSld(lstDiarioCosto),
+                DictPromFrsRpcSld: DiarioCosto.ConstruirDictPromedioFrsRpcSld(lstFrsValorizado, lstRpcValorizado, lstDiarioCosto)
             );
 
             int contadorFrs = 0;
             int contadorRpc = 0;
             int contadorSld = 0;
-
             // 2. Valorizar en paralelo
             Parallel.ForEach(lstDiarioCosto,
                 () => (Frs: 0, Rpc: 0, Sld: 0), 
@@ -277,19 +302,20 @@ namespace CostManagement.Dominio.Reglas
                 //        "Lote: {Lote} | Prod: {Prod} | Talla: {Talla} ",
                 //        diario.strProCod, diario.intLote, diario.strProCodcor, diario.stTalCodigo);
                 //}
+                diario.InitializeKeys();
                 var fuente = AsignarCostoDiario(diario, objContext);
                 switch (fuente)
                 {
                     case FuenteCosto.Frs:
-                        _objLogger.LogDebug("[CostoValorizacionMotor] FRS → Lote: {Lote} | Prod: {Prod}", diario.intLote, diario.strProCodcor);
+                        //_objLogger.LogDebug("[CostoValorizacionMotor] FRS → Lote: {Lote} | Prod: {Prod}", diario.intLote, diario.strProCodcor);
                         return (local.Frs + 1, local.Rpc, local.Sld); // Incrementamos FRS local
 
                     case FuenteCosto.Rpc:
-                        _objLogger.LogDebug("[CostoValorizacionMotor] RPC → Lote: {Lote} | Prod: {Prod}", diario.intLote, diario.strProCodcor);
+                        //_objLogger.LogDebug("[CostoValorizacionMotor] RPC → Lote: {Lote} | Prod: {Prod}", diario.intLote, diario.strProCodcor);
                         return (local.Frs, local.Rpc + 1, local.Sld); // Incrementamos RPC local
 
                     case FuenteCosto.Sld:
-                        _objLogger.LogDebug("[CostoValorizacionMotor] RPC → Lote: {Lote} | Prod: {Prod}", diario.intLote, diario.strProCodcor);
+                        //_objLogger.LogDebug("[CostoValorizacionMotor] RPC → Lote: {Lote} | Prod: {Prod}", diario.intLote, diario.strProCodcor);
                         return (local.Frs, local.Rpc, local.Sld + 1); // Incrementamos RPC local
 
                     default:
@@ -317,13 +343,13 @@ namespace CostManagement.Dominio.Reglas
                 }
 
             );
-
-            _objLogger.LogInformation(
-                "[CostoValorizacionMotor] Valorización completada. FRS: {Frs} | RPC: {Rpc} | SLD: {Sld} | Sin costo: {SinCosto}",
-                contadorFrs,
-                contadorRpc,
-                contadorSld,
-                lstDiarioCosto.Count - (contadorFrs + contadorRpc + contadorSld));
+             
+            //_objLogger.LogInformation(
+            //    "[CostoValorizacionMotor] Valorización completada. FRS: {Frs} | RPC: {Rpc} | SLD: {Sld} | Sin costo: {SinCosto}",
+            //    contadorFrs,
+            //    contadorRpc,
+            //    contadorSld,
+            //    lstDiarioCosto.Count - (contadorFrs + contadorRpc + contadorSld));
         }
 
         private FuenteCosto AsignarCostoDiario(DiarioCosto diario, ContextoCostos ctx)
@@ -373,10 +399,7 @@ namespace CostManagement.Dominio.Reglas
         {
             decimal dcCostoRpc, dcCostoFrs;
 
-            var key = new PromLoteXProdTal(
-                diario.intLote,
-                diario.strProCodcor,
-                (int)diario.stTalCodigo);
+            var key = diario.objLotePromLoteProdTalKey;
 
 
             
@@ -384,22 +407,33 @@ namespace CostManagement.Dominio.Reglas
             {
                     AplicarCosto(diario, costoFrs);
                 if (diario.intLote == 187575 && (diario.strProCod == "CAM" || diario.strCodTip == "CSOTRO"))
-                    _objLogger.LogInformation(
-                    "[CostoValorizacionMotor] {Cod} FRS (lote) → " +
-                    "Lote: {Lote} | Prod: {Prod} | Talla Desc: {TallaDesc} | Talla Cod: {Talla} | Costo: {Costo}",
-                    cod, diario.intLote, diario.strProCodcor,diario.strTalDescri, diario.stTalCodigo, costoFrs);
+                    //_objLogger.LogInformation(
+                    //"[CostoValorizacionMotor] {Cod} FRS (lote) → " +
+                    //"Lote: {Lote} | Prod: {Prod} | Talla Desc: {TallaDesc} | Talla Cod: {Talla} | Costo: {Costo}",
+                    //cod, diario.intLote, diario.strProCodcor,diario.strTalDescri, diario.stTalCodigo, costoFrs);
                 return FuenteCosto.Frs;
             }
 
             if (ctx.DictPorLoteRpc.TryGetValue(key, out var costoRpc))
             {
                 AplicarCosto(diario, costoRpc);
-                if (diario.intLote == 187575 && (diario.strProCod == "CAM" || diario.strCodTip == "CSOTRO"))
-                    _objLogger.LogInformation(
-                    "[CostoValorizacionMotor] {Cod} RPC (lote) → " +
-                    "Lote: {Lote} | Prod: {Prod} | Talla Desc: {TallaDesc} | Talla Cod: {Talla} | Costo: {Costo}",
-                    cod, diario.intLote, diario.strProCodcor, diario.strTalDescri, diario.stTalCodigo,  costoRpc);
+                //if (diario.intLote == 187575 && (diario.strProCod == "CAM" || diario.strCodTip == "CSOTRO"))
+                //    _objLogger.LogInformation(
+                //    "[CostoValorizacionMotor] {Cod} RPC (lote) → " +
+                //    "Lote: {Lote} | Prod: {Prod} | Talla Desc: {TallaDesc} | Talla Cod: {Talla} | Costo: {Costo}",
+                //    cod, diario.intLote, diario.strProCodcor, diario.strTalDescri, diario.stTalCodigo, costoRpc);
                 return FuenteCosto.Rpc;
+            }
+
+            if (ctx.DictPorLoteSld.TryGetValue(key, out var costoSld))
+            {
+                AplicarCosto(diario, costoSld);
+                //if (diario.intLote == 187575 && (diario.strProCod == "CAM" || diario.strCodTip == "CSOTRO"))
+                //    _objLogger.LogInformation(
+                //    "[CostoValorizacionMotor] {Cod} RPC (lote) → " +
+                //    "Lote: {Lote} | Prod: {Prod} | Talla Desc: {TallaDesc} | Talla Cod: {Talla} | Costo: {Costo}",
+                //    cod, diario.intLote, diario.strProCodcor, diario.strTalDescri, diario.stTalCodigo, costoSld);
+                return FuenteCosto.Sld;
             }
 
             return FuenteCosto.Ninguna;
@@ -414,25 +448,35 @@ namespace CostManagement.Dominio.Reglas
 
         private FuenteCosto AplicarCostoExport(DiarioCosto diario, ContextoCostos ctx)
         {
-            var key = new PromXProdTal(diario.strProCodcor, (int)diario.stTalCodigo);
+            var key = diario.objLotePromProdTalKey;
+            
+            //if (ctx.DictPromFrs.TryGetValue(key, out var costoProm))
+            //{
+            //    AplicarCosto(diario, costoProm);
+            //    _objLogger.LogDebug(
+            //        "[CostoValorizacionMotor] EXPORT FRS (prom) → " +
+            //        "Prod: {Prod} | Talla: {Talla} | Costo: {Costo}",
+            //        diario.strProCodcor, diario.stTalCodigo, costoProm);
+            //    return FuenteCosto.Frs;
+            //}
 
-            if (ctx.DictPromFrs.TryGetValue(key, out var costoProm))
-            {
-                AplicarCosto(diario, costoProm);
-                _objLogger.LogDebug(
-                    "[CostoValorizacionMotor] EXPORT FRS (prom) → " +
-                    "Prod: {Prod} | Talla: {Talla} | Costo: {Costo}",
-                    diario.strProCodcor, diario.stTalCodigo, costoProm);
-                return FuenteCosto.Frs;
-            }
+            //if (ctx.DictPromRpc.TryGetValue(key, out var costoPromRpc))
+            //{
+            //    AplicarCosto(diario, costoPromRpc);
+            //    _objLogger.LogDebug(
+            //        "[CostoValorizacionMotor] EXPORT RPC (prom) → " +
+            //        "Prod: {Prod} | Talla: {Talla} | Costo: {Costo}",
+            //        diario.strProCodcor, diario.stTalCodigo, costoPromRpc);
+            //    return FuenteCosto.Rpc;
+            //}
 
-            if (ctx.DictPromRpc.TryGetValue(key, out var costoPromRpc))
+            if (ctx.DictPromFrsRpcSld.TryGetValue(key, out var costoPromMix))
             {
-                AplicarCosto(diario, costoPromRpc);
-                _objLogger.LogDebug(
-                    "[CostoValorizacionMotor] EXPORT RPC (prom) → " +
-                    "Prod: {Prod} | Talla: {Talla} | Costo: {Costo}",
-                    diario.strProCodcor, diario.stTalCodigo, costoPromRpc);
+                AplicarCosto(diario, costoPromMix);
+                //_objLogger.LogDebug(
+                //    "[CostoValorizacionMotor] EXPORT RPC (prom) → " +
+                //    "Prod: {Prod} | Talla: {Talla} | Costo: {Costo}",
+                //    diario.strProCodcor, diario.stTalCodigo, costoPromMix);
                 return FuenteCosto.Rpc;
             }
 
@@ -456,20 +500,20 @@ namespace CostManagement.Dominio.Reglas
                 objDiario.strProCodcor,
                 (int)objDiario.stTalCodigo);
 
-            if (objDiario.intLote == 187762 && (objDiario.strProCod == "CAM" || objDiario.strCodTip == "CSOTRO") && objDiario.strProCodcor.Equals("5009"))
-                _objLogger.LogInformation(
-                    "[CostoValorizacionMotor] MOV ENTRA → " +
-                    "Proceso :{proc} | TipoProc: {tipProc} | Lote: {Lote} | Prod: {Prod} | Talla: {Talla} ",
-                    objDiario.strDescripcion, objDiario.strTipo,objDiario.intLote, objDiario.strProCodcor, objDiario.stTalCodigo);
+            //if (objDiario.intLote == 187762 && (objDiario.strProCod == "CAM" || objDiario.strCodTip == "CSOTRO") && objDiario.strProCodcor.Equals("5009"))
+                //_objLogger.LogInformation(
+                //    "[CostoValorizacionMotor] MOV ENTRA → " +
+                //    "Proceso :{proc} | TipoProc: {tipProc} | Lote: {Lote} | Prod: {Prod} | Talla: {Talla} ",
+                //    objDiario.strDescripcion, objDiario.strTipo,objDiario.intLote, objDiario.strProCodcor, objDiario.stTalCodigo);
             if (ctx.DictPorLoteFrs.TryGetValue(key, out var costoFrs))
             {
                 AplicarCosto(objDiario, costoFrs);
 
-                if (objDiario.intLote == 187762 && (objDiario.strProCod == "CAM" || objDiario.strCodTip == "CSOTRO") && objDiario.strProCodcor.Equals("5009"))
-                    _objLogger.LogInformation(
-                        "[CostoValorizacionMotor] MOV FRS → " +
-                    "Proceso :{proc} | TipoProc: {tipProc} | Lote: {Lote} | Prod: {Prod} | Talla: {Talla} | Costo: {Costo}",
-                    objDiario.strDescripcion, objDiario.strTipo, objDiario.intLote, objDiario.strProCodcor, objDiario.stTalCodigo, costoFrs);
+                //if (objDiario.intLote == 187762 && (objDiario.strProCod == "CAM" || objDiario.strCodTip == "CSOTRO") && objDiario.strProCodcor.Equals("5009"))
+                    //_objLogger.LogInformation(
+                    //    "[CostoValorizacionMotor] MOV FRS → " +
+                    //"Proceso :{proc} | TipoProc: {tipProc} | Lote: {Lote} | Prod: {Prod} | Talla: {Talla} | Costo: {Costo}",
+                    //objDiario.strDescripcion, objDiario.strTipo, objDiario.intLote, objDiario.strProCodcor, objDiario.stTalCodigo, costoFrs);
                 //_objLogger.LogInformation(
                 //    "[CostoValorizacionMotor] MOV FRS → " +
                 //    "Lote: {Lote} | Prod: {Prod} | Talla: {Talla} | Costo: {Costo}",
@@ -479,21 +523,21 @@ namespace CostManagement.Dominio.Reglas
             else if (ctx.DictPorLoteRpc.TryGetValue(key, out var costoRpc))
             {
                 AplicarCosto(objDiario, costoRpc);
-                if (objDiario.intLote == 187762 && (objDiario.strProCod == "CAM" || objDiario.strCodTip == "CSOTRO") && objDiario.strProCodcor.Equals("5009"))
-                    _objLogger.LogInformation(
-                        "[CostoValorizacionMotor] MOV RPC → " +
-                    "Proceso :{proc} | TipoProc: {tipProc} | Lote: {Lote} | Prod: {Prod} | Talla: {Talla} | Costo: {Costo} ",
-                    objDiario.strDescripcion, objDiario.strTipo, objDiario.intLote, objDiario.strProCodcor, objDiario.stTalCodigo, costoRpc);
+                //if (objDiario.intLote == 187762 && (objDiario.strProCod == "CAM" || objDiario.strCodTip == "CSOTRO") && objDiario.strProCodcor.Equals("5009"))
+                //    _objLogger.LogInformation(
+                //        "[CostoValorizacionMotor] MOV RPC → " +
+                //    "Proceso :{proc} | TipoProc: {tipProc} | Lote: {Lote} | Prod: {Prod} | Talla: {Talla} | Costo: {Costo} ",
+                //    objDiario.strDescripcion, objDiario.strTipo, objDiario.intLote, objDiario.strProCodcor, objDiario.stTalCodigo, costoRpc);
                 return FuenteCosto.Rpc;
             }
             else if (ctx.DictPorLoteSld.TryGetValue(key, out var costoSld))
             {
                 AplicarCosto(objDiario, costoSld);
-                if (objDiario.intLote == 187762 && (objDiario.strProCod == "CAM" || objDiario.strCodTip == "CSOTRO") && objDiario.strProCodcor.Equals("5009"))
-                    _objLogger.LogInformation(
-                        "[CostoValorizacionMotor] MOV SLD → " +
-                    "Proceso :{proc} | TipoProc: {tipProc} | Lote: {Lote} | Prod: {Prod} | Talla: {Talla} | Costo: {Costo} ",
-                    objDiario.strDescripcion, objDiario.strTipo, objDiario.intLote, objDiario.strProCodcor, objDiario.stTalCodigo, costoSld);
+                //if (objDiario.intLote == 187762 && (objDiario.strProCod == "CAM" || objDiario.strCodTip == "CSOTRO") && objDiario.strProCodcor.Equals("5009"))
+                //    _objLogger.LogInformation(
+                //        "[CostoValorizacionMotor] MOV SLD → " +
+                //    "Proceso :{proc} | TipoProc: {tipProc} | Lote: {Lote} | Prod: {Prod} | Talla: {Talla} | Costo: {Costo} ",
+                //    objDiario.strDescripcion, objDiario.strTipo, objDiario.intLote, objDiario.strProCodcor, objDiario.stTalCodigo, costoSld);
                 return FuenteCosto.Sld;
             }
 
@@ -511,6 +555,40 @@ namespace CostManagement.Dominio.Reglas
         {
             decimal factor = (decimal)Math.Pow(10, decimales);
             return Math.Truncate(valor * factor) / factor;
+        }
+        #endregion
+
+
+        #region Diario Costo Venta
+
+        public void AsignarCostoDiarioVenta(List<DiarioCosto> lstDiarioCost, List<RptVentaVsFactura> lstFactura)
+        {
+            ConcurrentDictionary<PromXProdTal, decimal> dicCostoVenta;
+            try
+            {
+                dicCostoVenta = DiarioCosto.ConstruirDictPromedioDiario(lstDiarioCost);
+                foreach (var objItem in lstFactura)
+                {
+                    var objKey = new PromXProdTal(Convert.ToString(objItem.intCodProd), objItem.intTalla);
+                    decimal dcValorCosto = dicCostoVenta.GetValueOrDefault(objKey, 0m);
+                    if (dcValorCosto != 0m)
+                    {
+                        AplicarCosto(objItem, dcValorCosto);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error en [{nameof(AsignarCostoDiarioVenta)}] ERROR : {ex.Message}");
+            }
+        }
+
+
+        private static void AplicarCosto(RptVentaVsFactura objDiario, decimal dcCostoXLibra)
+        {
+            objDiario.dcCostoVenta = Truncar(dcCostoXLibra, _intDecimalesCu);
+            objDiario.CalculosReporte();
+
         }
         #endregion
 

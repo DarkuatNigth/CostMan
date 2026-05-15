@@ -5,6 +5,7 @@ using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Repository.Interface;
 using CostManagement.Infraestructura.Utils;
+using CostManagementService.Aplicacion.DTos;
 using CostManagementService.Aplicación.DTos;
 using CostManagementService.Aplicacion.Features;
 using Microsoft.AspNetCore.Http;
@@ -369,22 +370,52 @@ namespace CostManagement.API.Controllers
 
 
 
-        [HttpGet("ventasvsfacturas")]
+        [HttpGet("saldo-inv")]
+        public async Task<IActionResult> ObtenerSaldoInventario(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+
+            try
+            {
+
+                List<DiarioCosto> lstResult = await _objCostoMateriaPrima.ObtenerDiarioCostoAsync(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Consulta ejecutada correctamente",
+                    objData = dtResult
+                });
+
+            }
+            catch (Exception objException)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error al obtener la informacion: " + objException.Message,
+                    objData = ""
+                });
+            }
+        }
+
+
+        [HttpGet("diario-costo-venta")]
         public async Task<IActionResult> ObtenerVentasVsFacturas(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
 
             try
             {
 
-                //var lstResult = 
+                var lstResult = 
                     await _objOperacionComercial.ObtenerReporteVentasVsFacturas(dtFechaInicio, dtFechaFin);
-                //var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
 
-                return Ok(new ApiResponse<EmptyResult>
+                return Ok(new ApiResponse<DataTablesResultDto>
                 {
                     blStatus = true,
                     strMensaje = "Consulta ejecutada correctamente",
-                    objData = Empty
+                    objData = dtResult
                 });
 
             }
@@ -411,6 +442,7 @@ namespace CostManagement.API.Controllers
             List<CostoMatEmpaDto> materialEmpaque;
             List<MatPrimaReproceso> materiaPrimaRepro;
             List<InvValDataDto> invValDataDtos;
+            List<RptVentaVsFactura> lstReportVent;
             List<DiarioCosto> lstDiarioCost;
             DataTable dataTable = new DataTable();
             try
@@ -455,6 +487,12 @@ namespace CostManagement.API.Controllers
                         lstDiarioCost = await
                             _objCostoMateriaPrima.ObtenerDiarioCostoAsync(fechaInicio, fechaFin);
                         dataTable = lstDiarioCost.ADataTable();
+                        break;
+
+                    case "diario-costo-venta":
+                        lstReportVent = await
+                            _objOperacionComercial.ObtenerReporteVentasVsFacturas(fechaInicio, fechaFin);
+                        dataTable = lstReportVent.ADataTable();
                         break;
 
                     case "materia-prima-sal":

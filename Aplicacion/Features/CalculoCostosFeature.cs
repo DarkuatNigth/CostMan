@@ -5,6 +5,7 @@ using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Repository.Interface;
 using CostManagementService.Aplicación.DTos;
+using CostManagementService.Dominio.Reglas;
 using DocumentFormat.OpenXml.Drawing.Charts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -18,6 +19,7 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using static CostManagementService.Dominio.Enums.EnumLiquidacionDto;
 
 namespace CostManagement.Aplicación.Features
 {
@@ -31,6 +33,7 @@ namespace CostManagement.Aplicación.Features
         private readonly IOptions<ParametrosConfig> _objConfig;
         private readonly MotorAsignacionPrecios _objMotorAsigPrec;
         private readonly MotorProrrateo _objMotorProrra;
+        private readonly MotorMergeValorizacion _objMotorMergeVal;
         private readonly MotorGrafoTopologico _objMotorGrafo;
         private readonly MotorProcesoParametro _objMotorProceso;
         public CalculoCostosFeature(
@@ -51,6 +54,7 @@ namespace CostManagement.Aplicación.Features
             _objMotorAsigPrec = new MotorAsignacionPrecios(_objLogger);
             _objMotorProrra = new MotorProrrateo(_objMotorAsigPrec);
             _objMotorGrafo = new MotorGrafoTopologico(_objMotorProrra, _objMotorAsigPrec, _objLogger);
+            _objMotorMergeVal = new MotorMergeValorizacion(_objLogger);
             _objMotorProceso = new MotorProcesoParametro(_objLogger);
         }
 
@@ -77,66 +81,13 @@ namespace CostManagement.Aplicación.Features
                 if (!objDataProceso.lstLiqFresco.Any() || !objDataProceso.lstLiqFrsRpc.Any())
                     throw new Exception("No se encontraron liquidaciones de materia prima en el rango de fechas proporcionado.");
 
-                if (lstYaValorizados.Any())
-                {
-                    // 1. Creamos el lookup igual que antes
-                    var lookupValorizados = lstYaValorizados
-                            .ToLookup(v => $"{v.intLote}-{v.intCodProd}-{v.intLidCodTal}");
 
-                    // 2. Creamos un diccionario de enumeradores. 
-                    // Esto mantendrá el "puntero" o posición para cada llave.
-                    var enumeradores = lookupValorizados
-                            .ToDictionary(group => group.Key, group => group.GetEnumerator());
+                // ══════ Merge Fresco: cache BD → datos crudos ══════
+                _objMotorMergeVal.MergeFrescoValorizado(objDataProceso.lstLiqFresco, lstYaValorizados);
 
-                    try
-                    {
-                        foreach (var itemFresco in objDataProceso.lstLiqFresco)
-                        {
-                            string llave = $"{itemFresco.intLote}-{itemFresco.intCodProd}-{itemFresco.intLidCodTal}";
+                // ══════ Merge RPC: intermediario → datos crudos ══════
+                _objMotorMergeVal.MergeReproValorizado(objDataProceso.lstLiqFrsRpc, objDataProceso.lstLiqRepro);
 
-                            if (enumeradores.TryGetValue(llave, out var enumerador) && enumerador.MoveNext())
-                            {
-                                var calculado = enumerador.Current;
-                                itemFresco.MergeValorizacion(calculado);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        foreach (var e in enumeradores.Values) e.Dispose();
-                    }
-                }
-
-
-                if (objDataProceso.lstLiqRepro.Any())
-                {
-                    // 1. Creamos el lookup igual que antes
-                    var lookupValorizados = objDataProceso.lstLiqRepro
-                            .ToLookup(v => $"{v.intLoteUnificado}-{v.intProdCod}-{v.intCodTal}");
-
-                    // 2. Creamos un diccionario de enumeradores. 
-                    // Esto mantendrá el "puntero" o posición para cada llave.
-                    var enumeradores = lookupValorizados
-                            .ToDictionary(group => group.Key, group => group.GetEnumerator());
-
-                    try
-                    {
-                        foreach (var itemFresco in objDataProceso.lstLiqFrsRpc)
-                        {
-                            string llave = $"{itemFresco.intLote}-{itemFresco.intCodProd}-{itemFresco.intLidCodTal}";
-
-                            if (enumeradores.TryGetValue(llave, out var enumerador) && enumerador.MoveNext())
-                            {
-                                var calculado = enumerador.Current;
-                                itemFresco.MergeValorizacion(calculado);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        foreach (var e in enumeradores.Values) e.Dispose();
-                    }
-                }
                 await Task.WhenAll(
                      _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(lstLiquidaciones)
                     );
@@ -172,32 +123,9 @@ namespace CostManagement.Aplicación.Features
                 lstYaValorizados = await TareaFrsVal;
                 await ObtenerValProceso(dtFechaInicio, objDataProceso);
                 //_objMotorProceso.CalcularNuevoCostProcesoSum(objDataProceso);
-                if (lstYaValorizados.Any())
-                {
-                    var lookupValorizados = lstYaValorizados
-                            .ToLookup(v => $"{v.intLote}-{v.intCodProd}-{v.intLidCodTal}");
 
-                    var enumeradores = lookupValorizados
-                            .ToDictionary(group => group.Key, group => group.GetEnumerator());
+                _objMotorMergeVal.MergeFrescoValorizado(objDataProceso.lstLiqFresco, lstYaValorizados);
 
-                    try
-                    {
-                        foreach (var itemFresco in objDataProceso.lstLiqFresco)
-                        {
-                            string llave = $"{itemFresco.intLote}-{itemFresco.intCodProd}-{itemFresco.intLidCodTal}";
-
-                            if (enumeradores.TryGetValue(llave, out var enumerador) && enumerador.MoveNext())
-                            {
-                                var calculado = enumerador.Current;
-                                itemFresco.MergeValorizacion(calculado);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        foreach (var e in enumeradores.Values) e.Dispose();
-                    }
-                }
 
 
                 lstLiquidaciones.AddRange(objDataProceso.lstLiqFresco);
@@ -414,32 +342,26 @@ namespace CostManagement.Aplicación.Features
 
         #region Flujo Mat Prima Reproceso
 
-        public async Task<List<MatPrimaReproceso>> ObtenerReporteMateriaPrimaReproValorizada(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        public async Task<List<MatPrimaReproceso>> ObtenerReporteMateriaPrimaReproValorizada(DateOnly dtFechaInicio, DateOnly dtFechaFin, enmTipoConsulta objEnmTip = enmTipoConsulta.ConFront)
         {
-            List<MatPrimaReproceso> lstReproVal;
+            //List<MatPrimaReproceso> lstReproVal;
             List<string> lstItemCod;
             List<PrecioFrsXMov> lstPrecioLiqOtrProc, lstPrecioFrsXMovCam;
             List<CostoMovArtDto> lstCostPromHidra;
             DataProcesoParam objDataProceso = new();
             try
             {
-
                 int diasEnMes = DateTime.DaysInMonth(dtFechaInicio.Year, dtFechaInicio.Month);
                 DateOnly dtFechaCorte = new DateOnly(dtFechaInicio.Year, dtFechaInicio.Month, diasEnMes);
-                var tareaReproceso = _objMateriaPrima.ReporteReproPlanRecibProc(dtFechaInicio, dtFechaFin);
-                var tareaReproVal = _objMateriaPrima.ObtenerReproValorizada(dtFechaInicio, dtFechaFin);
-                await Task.WhenAll(tareaReproceso, tareaReproVal);
-                objDataProceso.lstLiqRepro = await tareaReproceso;
-                lstReproVal = await tareaReproVal;
-                if (!objDataProceso.lstLiqRepro.Any())
-                    throw new Exception("No se encontraron Procesos de materia prima Reproceso en el rango de fechas proporcionado.");
-
-
+                objDataProceso.lstLiqRepro = await ObtenerMatPrimRepro(dtFechaInicio, dtFechaFin);
                 var lstLiqLote = objDataProceso.lstLiqRepro
                         .Select(x => (long)x.intLoteOrigen)
                         .Distinct()
                         .ToList();
-
+                if (objEnmTip == enmTipoConsulta.ConBack && objDataProceso.lstLiqRepro.Any(x => x.dcCostoTotXLibra != null))
+                {
+                    return objDataProceso.lstLiqRepro;
+                }
                 lstItemCod = MatPrimaReproceso.ObtenerLstItemHidra(objDataProceso.lstLiqRepro);
 
                 var tareaFresco = ObtenerLiquidacionValorizada(dtFechaInicio, dtFechaFin);
@@ -488,145 +410,51 @@ namespace CostManagement.Aplicación.Features
 
         public async Task<List<MatPrimaReproceso>> ObtenerMatPrimRepro(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
-            List<string> lstItemCod;
-            List<PrecioFrsXMov> lstPrecioLiqOtrProc, lstPrecioFrsXMovCam;
-            List<CostoMovArtDto> lstCostPromHidra;
-            DataProcesoParam objDataProceso = new();
+            List<MatPrimaReproceso> lstMatPrimaRepro, lstReproVal;
             try
             {
-                int diasEnMes = DateTime.DaysInMonth(dtFechaInicio.Year, dtFechaInicio.Month);
-                DateOnly dtFechaCorte = new DateOnly(dtFechaInicio.Year, dtFechaInicio.Month, diasEnMes);
+                // 1. Datos crudos (estructura, libras, agrupación)
                 var tareaReproceso = _objMateriaPrima.ReporteReproPlanRecibProc(dtFechaInicio, dtFechaFin);
-                //var tareaReproVal = _objMateriaPrima.ObtenerReproValorizada(dtFechaInicio, dtFechaFin);
-                await Task.WhenAll(tareaReproceso/*, tareaReproVal*/);
-                objDataProceso.lstLiqRepro = await tareaReproceso;
-                //lstReproVal = await tareaReproVal;
-                if (!objDataProceso.lstLiqRepro.Any())
-                    throw new Exception("No se encontraron Procesos de materia prima Reproceso en el rango de fechas proporcionado.");
 
+                // 2. Cache desde tb_materiaPrimaReproValorizada
+                var tareaReproVal = _objMateriaPrima.ObtenerReproValorizada(dtFechaInicio, dtFechaFin);
 
-                var lstLiqLote = objDataProceso.lstLiqRepro
-                        .Select(x => (long)x.intLoteOrigen)
-                        .Distinct()
-                        .ToList();
+                await Task.WhenAll(tareaReproceso, tareaReproVal);
 
-                lstItemCod = MatPrimaReproceso.ObtenerLstItemHidra(objDataProceso.lstLiqRepro);
+                lstMatPrimaRepro = await tareaReproceso;
+                lstReproVal = await tareaReproVal;
 
-                var tareaCostPromHidra = _objMateriaPrima.CostoUltMovXItemCod(lstItemCod, dtFechaInicio, dtFechaFin);
-                var tareaFresco = ObtenerLiquidacionValorizada(dtFechaInicio, dtFechaFin);
-                var tareaPrecioFrsXMovCam = _objMateriaPrima.ObtenerPrecioFrsSinTallaXMovCam(lstLiqLote);
-                var tareaOtroProc = _objMateriaPrima.ObtenerConsumoMovLiqOtroProc(lstLiqLote);
-                var TareaTarifaProceso = _objProcesoParametro.ConsultarProcesoTarifa(dtFechaCorte);
+                if (!lstMatPrimaRepro.Any())
+                    throw new Exception(
+                        "No se encontraron Procesos de materia prima Reproceso " +
+                        "en el rango de fechas proporcionado.");
 
-                await ObtenerValProceso(dtFechaInicio, objDataProceso);
-                await Task.WhenAll(tareaCostPromHidra, tareaOtroProc, tareaPrecioFrsXMovCam, tareaFresco, TareaTarifaProceso,
-                    _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(objDataProceso.lstLiqRepro)
-                    );
-                lstCostPromHidra = await tareaCostPromHidra;
-                objDataProceso.lstLiqFresco = await tareaFresco;
-                objDataProceso.lstProcesoTarifa = await TareaTarifaProceso;
-                lstPrecioLiqOtrProc = await tareaOtroProc;
-                lstPrecioFrsXMovCam = await tareaPrecioFrsXMovCam;
-                _objMotorAsigPrec.AsignarCostHidra(lstCostPromHidra, objDataProceso.lstLiqRepro);
-                _objMotorProceso.AsignarCostosProcesosRepro(objDataProceso);
-                _objMotorAsigPrec.AsignarCostRecibiXFrsMovCam(lstPrecioLiqOtrProc, lstPrecioFrsXMovCam, objDataProceso);
-                var lstLiqLoteInv = objDataProceso.lstLiqRepro.Where(lbsRecProc =>
-                        lbsRecProc.strAgrupacion == "1. RECIBIDO" && lbsRecProc.dbCostoXSecuencial == 0)
-                    .Select(x => x.intLoteOrigen)
-                    .Distinct()
-                    .ToList();
-                var lstCodProd = objDataProceso.lstLiqRepro
-                .Select(x => x.intProdCod.ToString())
-                .Distinct()
-                .ToList();
+                // 3. Merge: asignar dcCostoTotXLibra desde cache a ítems PROCESADO
+                if (lstReproVal.Any())
+                {
+                    var lookupCache = lstReproVal
+                        .Where(v => v.dcCostoTotXLibra != null && v.dcCostoTotXLibra > 0)
+                        .ToLookup(v => (v.intLotNumero, v.intLoteUnificado, v.intProdCod, v.intCodTal));
 
-                var lstPreciosProm = await _objMateriaPrima.ObtenerMatPrimSaldo(lstCodProd);
-                var lstPrecios = await _objMateriaPrima.ObtenerMatPrimSaldo(lstLiqLoteInv);
-                _objMotorAsigPrec.EjecutarAsignacionPorSaldo(objDataProceso.lstLiqRepro, lstPreciosProm, lstPrecios);
-                var lstFrsUni = lstPrecioFrsXMovCam.Where(p => p.strTrcTipo == "UNI").ToList();
-                var lstFrsDir = lstPrecioFrsXMovCam.Where(p => p.strTrcTipo == "DIR").ToList();
-                _objMotorGrafo.CostearTodosLotesEnOrden(objDataProceso, lstFrsUni, lstFrsDir);
+                    foreach (var item in lstMatPrimaRepro.Where(x =>
+                        x.strAgrupacion == "2. PROCESADO" &&
+                        x.dcCostoTotXLibra == null))
+                    {
+                        var key = (item.intLotNumero, item.intLoteUnificado,
+                                   item.intProdCod, item.intCodTal);
 
+                        var cached = lookupCache[key].FirstOrDefault();
+                        if (cached != null)
+                        {
+                            item.dcCostoTotXLibra = cached.dcCostoTotXLibra;
+                        }
+                    }
 
-                //if (!lstReproVal.Any())
-                //{
-
-                //var lstLiqLote = lstMatPrimaReproceso
-                //    .Select(x => (long)x.intLoteOrigen)
-                //    .Distinct()
-                //    .ToList();
-
-                //var tareaFresco = ObtenerReporteMateriaPrimaValorizada(dtFechaInicio, dtFechaFin);
-                //var tareaPrecioFrsXMovCam = _objMateriaPrima.ObtenerPrecioFrsSinTallaXMovCam(lstLiqLote);
-                //var tareaOtroProc = _objMateriaPrima.ObtenerConsumoMovLiqOtroProc(lstLiqLote);
-                //await Task.WhenAll(
-                //    _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(lstMatPrimaReproceso),
-                //    ObtenerPrecioHidra(lstMatPrimaReproceso, dtFechaInicio, dtFechaFin),
-                //    _objProcesoParametro.ObtenerCostosProcesosRepro(lstMatPrimaReproceso, dtFechaFin),
-                //    tareaOtroProc, tareaPrecioFrsXMovCam, tareaFresco);
-                //lstMatPrimaFresco = await tareaFresco;
-                //lstMatPrimaFresco = lstMatPrimaFresco.Where(l => l.strTipoLiq == "LIQ_PFR").ToList();
-                //lstPrecioLiqOtrProc = await tareaOtroProc;
-                //lstPrecioFrsXMovCam = await tareaPrecioFrsXMovCam;
-
-
-                //objMotorAsigPrec.AsignarCostRecibiXFrsMovCam(lstMatPrimaReproceso, lstPrecioLiqOtrProc, lstPrecioFrsXMovCam, lstMatPrimaFresco);
-                //var lstLiqLoteInv = lstMatPrimaReproceso.Where(lbsRecProc =>
-                //        lbsRecProc.strAgrupacion == "1. RECIBIDO" && lbsRecProc.dbCostoXSecuencial == 0)
-                //    .Select(x => x.intLoteOrigen)
-                //    .Distinct()
-                //    .ToList();
-                //var lstCodProd = lstMatPrimaReproceso
-                //.Select(x => x.intProdCod.ToString())
-                //.Distinct()
-                //.ToList();
-
-                //var lstPreciosProm = await _objMateriaPrima.ObtenerMatPrimSaldo(lstCodProd);
-                //var lstPrecios = await _objMateriaPrima.ObtenerMatPrimSaldo(lstLiqLoteInv);
-                //objMotorAsigPrec.EjecutarAsignacionPorSaldo(lstMatPrimaReproceso, lstPreciosProm, lstPrecios);
-                //var lstFrsUni = lstPrecioFrsXMovCam.Where(p => p.strTrcTipo == "UNI").ToList();
-                //var lstFrsDir = lstPrecioFrsXMovCam.Where(p => p.strTrcTipo == "DIR").ToList();
-                //objMotorGrafo.CostearTodosLotesEnOrden(lstMatPrimaReproceso, lstMatPrimaFresco, lstFrsUni, lstFrsDir);
-
-
-                //}
-                //else
-                //{
-
-                //    await Task.WhenAll(
-                //        _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(lstMatPrimaReproceso),
-                //        ObtenerPrecioHidra(lstMatPrimaReproceso, dtFechaInicio, dtFechaFin),
-                //        _objProcesoParametro.ObtenerCostosProcesosRepro(lstMatPrimaReproceso, dtFechaFin)
-                //        );
-                //    var lookupValorizados = lstReproVal
-                //        .ToLookup(v => $"{v.intLotNumero}-{v.intLoteUnificado}-{v.intProdCod}-{v.intCodTal}");
-                //    var enumeradores = lookupValorizados
-                //        .ToDictionary(g => g.Key, g => g.GetEnumerator());
-
-                //    try
-                //    {
-                //        var itemsAProcesar = lstMatPrimaReproceso
-                //            .Where(p => p.strAgrupacion == "2. PROCESADO");
-
-                //        foreach (var itemFresco in itemsAProcesar)
-                //        {
-                //            string llave = $"{itemFresco.intLotNumero}-{itemFresco.intLoteUnificado}-{itemFresco.intProdCod}-{itemFresco.intCodTal}";
-
-                //            if (enumeradores.TryGetValue(llave, out var enumerador) && enumerador.MoveNext())
-                //            {
-                //                var calculado = enumerador.Current;
-                //                itemFresco.MergeValorizacion(calculado);
-                //            }
-                //        }
-                //    }
-                //    finally
-                //    {
-                //        // Limpieza de recursos de los enumeradores
-                //        foreach (var e in enumeradores.Values) e.Dispose();
-                //    }
-                //}
-                _objMotorAsigPrec.RendimientoReproPlanRecibProc(objDataProceso.lstLiqRepro);
-                return objDataProceso.lstLiqRepro.Where(l => l.strAgrupacion == "2. PROCESADO").ToList();
+                    _objLogger.LogInformation(
+                        $"[ObtenerMatPrimRepro] Cache: {lookupCache.Count} claves, " +
+                        $"aplicadas a ítems PROCESADO.");
+                }
+                return lstMatPrimaRepro/*.Where(l => l.strAgrupacion == "2. PROCESADO").ToList()*/;
             }
             catch (Exception objException)
             {
@@ -634,6 +462,8 @@ namespace CostManagement.Aplicación.Features
                 throw;
             }
         }
+
+
 
         public async Task RegistrarMpRprValorizado(RequestMatPrimDto objRequest)
         {
@@ -692,12 +522,20 @@ namespace CostManagement.Aplicación.Features
             try
             {
                 var tareaDiarioCosto = _objMateriaPrima.ObtenerMovimientosAsync(dtFechaInicio, dtFechaFin);
-                var tareaMtpRpcValorizado = ObtenerReporteMateriaPrimaReproValorizada(dtFechaInicio, dtFechaFin);
-                var tareaMtpFrsValorizado = ObtenerReporteMateriaPrimaValorizada(dtFechaInicio, dtFechaFin);
+
+                // ══════ CAMBIO: usar intermediario liviano en lugar del pipeline completo ══════
+                var tareaMtpRpcValorizado = ObtenerReporteMateriaPrimaReproValorizada(dtFechaInicio, dtFechaFin, enmTipoConsulta.ConBack);
+                var tareaMtpFrsValorizado = ObtenerLiquidacionValorizada(dtFechaInicio, dtFechaFin);
+
                 await Task.WhenAll(tareaDiarioCosto, tareaMtpRpcValorizado, tareaMtpFrsValorizado);
-                lstMtpFrsValorizado = (await tareaMtpFrsValorizado).Where(x => x.strTipoLiq == "LIQ_PFR").ToList();
-                lstMtpRpcValorizado = (await tareaMtpRpcValorizado).Where(x => x.strAgrupacion == "2. PROCESADO" /*x.dbCostoXSecuencial !=0*/).ToList();
                 lstDiarioCosto = await tareaDiarioCosto;
+                lstMtpFrsValorizado = (await tareaMtpFrsValorizado)
+                    .Where(x => x.strTipoLiq == "LIQ_PFR").ToList();
+
+                // dcCostoTotXLibra ya viene del intermediario (desde cache BD)
+                lstMtpRpcValorizado = (await tareaMtpRpcValorizado)
+                    .Where(x => x.strAgrupacion == "2. PROCESADO")
+                    .ToList();
 
 
                 _objMotorAsigPrec.AsignarCostoSaldo(lstDiarioCosto, lstMtpFrsValorizado, lstMtpRpcValorizado);
@@ -766,14 +604,59 @@ namespace CostManagement.Aplicación.Features
         public async Task<List<InventarioVal>> ObtenerInventarioValorizado(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
             List<InventarioVal> lstInvVal = new List<InventarioVal>();
+            List<DiarioCosto> lstCuadre = new List<DiarioCosto>();
             try
             {
-                lstInvVal = await _objMateriaPrima.ConsultarInvValorizado(dtFechaInicio, dtFechaFin);
+                DateOnly dtFechaCorteAnterior;
+
+                if (dtFechaInicio.Year == dtFechaFin.Year
+                    && dtFechaInicio.Month == dtFechaFin.Month)
+                {
+                    // FechaInicio es el 1ro del mes → restamos 1 día → último día mes anterior
+                    dtFechaCorteAnterior = dtFechaInicio.AddDays(-1);
+                }
+                else
+                {
+                    // Tomamos el mes de dtFechaFin, le restamos 1 mes, último día
+                    var dtMesAnterior = dtFechaFin.AddMonths(-1);
+                    dtFechaCorteAnterior = new DateOnly(
+                        dtMesAnterior.Year,
+                        dtMesAnterior.Month,
+                        DateTime.DaysInMonth(dtMesAnterior.Year, dtMesAnterior.Month));
+                }
+                var tareaInvInicial = _objMateriaPrima.ConsultarInvValBodite(dtFechaCorteAnterior, "I");
+                var tareaInvFinal = _objMateriaPrima.ConsultarInvValBodite(dtFechaFin, "F");
+                var tareaDiarioCosto = ObtenerDiarioCostoAsync(dtFechaInicio, dtFechaFin);
+                var tareaInvValorado =  _objMateriaPrima.ConsultarInvValorizado(dtFechaInicio, dtFechaFin);
+                await Task.WhenAll(tareaInvInicial, tareaInvFinal, tareaDiarioCosto, tareaInvValorado);
+                var lstInvInicial = await tareaInvInicial;
+                var lstInvFinal = await tareaInvFinal;
+                lstCuadre = await tareaDiarioCosto;
+                var lstInvValSubido = await tareaInvValorado;
+
+
+                if (lstInvValSubido.Any())
+                {
+                    lstInvVal = lstInvValSubido;
+                }
+                else
+                {
+                    lstInvVal.AddRange(lstInvInicial);
+                }
+
+                if (lstInvFinal.Any())
+                {
+                    lstInvVal.AddRange(lstInvFinal);
+                }
+                //lstInvVal.AddRange(InventarioVal.GenerarSaldoFinal(lstCuadre));
+                _objMotorMergeVal.MergeInventarioValorizado(lstInvVal, lstCuadre);
                 return lstInvVal;
             }
             catch (Exception objException)
             {
-                _objLogger.LogError($"[CalculoCostoMateriaPrimaFeature].[GenerarInfoMateriaPrimaSaldo] Ocurrio un error: {objException.Message}");
+                _objLogger.LogError(
+                    $"[CalculoCostoMateriaPrimaFeature].[ObtenerInventarioValorizado] " +
+                    $"Ocurrio un error: {objException.Message}");
                 throw;
             }
         }
@@ -785,10 +668,12 @@ namespace CostManagement.Aplicación.Features
             List<InvValDataDto> lstInvVal;
             try
             {
-
-
                 lstInvVal = objRequest.lstInvVal;
 
+                var primerDiaMesActual = new DateOnly(objRequest.dtFechaCorte.Year, objRequest.dtFechaCorte.Month, 1);
+
+                // Al restar un día, retrocedemos automáticamente al último día del mes anterior
+                objRequest.dtFechaCorte = primerDiaMesActual.AddDays(-1);
                 await _objMateriaPrima.ObtenerDatosProd(lstInvVal, objRequest.dtFechaCorte.ToString("yyyy/MM/dd"));
                 await _objMateriaPrima.CrearInvMatPrimExcel(lstInvVal, objRequest);
             }
@@ -887,6 +772,7 @@ namespace CostManagement.Aplicación.Features
                 throw;
             }
         }
+
         #endregion
 
 

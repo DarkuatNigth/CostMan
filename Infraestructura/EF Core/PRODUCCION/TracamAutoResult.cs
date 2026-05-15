@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations.Schema;
+﻿using System.Collections.Concurrent;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CostManagementService.Infraestructura.EF_Core.SONG
 {
@@ -126,10 +127,28 @@ namespace CostManagementService.Infraestructura.EF_Core.SONG
         [Column("trc_serieFactLocal")]
         public string? strTrcSerieFactLocal { get; set; } // varchar(7), null: 1
 
+        [Column("mov_numdoc")]
+        public string? strMovNumdoc { get; set; } // varchar(7), null: 1
+
 
         // --- FECHAS (dt) ---
 
         [Column("trc_fecha")]
         public DateTime dtTrcFecha { get; set; } // datetime, null: 0
+
+
+        public static ConcurrentDictionary<string, TracamAutoResult> CrearDicMovimiento(
+                List<TracamAutoResult> lstPesosReales)
+        {
+            return new ConcurrentDictionary<string, TracamAutoResult>(
+                lstPesosReales  
+                    .Where(x => !string.IsNullOrEmpty(x.strMovNumdoc) && !string.IsNullOrWhiteSpace(x.strMovNumdoc))
+                    .GroupBy(x => x.strMovNumdoc)
+                    .ToDictionary(
+                        grp => grp.Key!,
+                        grp => grp.First()
+                    )
+            );
+        }
     }
 }

@@ -302,14 +302,28 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         public bool blExcluidoCosteo { get; set; }
 
+        [NotMapped]
+        [JsonIgnore]
+        public LoteRpcValKey objLotRpc;
+
+        [NotMapped]
+        [JsonIgnore]
+        public LoteRpcKeyXSec objLoteKey;
+
+        [NotMapped]
+        [JsonIgnore]
+        public LoteRpcValKey objValKey;
+
+        [NotMapped]
+        [JsonIgnore]
+        public LoteRpcKeyXProdTal objProdTalKey;
+
+        [NotMapped]
+        [JsonIgnore]
+        public LoteRpcKeyLoteXProd objLoteProdReciKey;
+        #region Constructor
         public MatPrimaReproceso() { }
 
-
-        //lstProc.Certificado,
-        //                lstProc.LidPremio,
-        //                lstProc.CthSallbs,
-        //                lstProc.CthHidlbs,
-        //                lstProc.RtCodItem,
         public MatPrimaReproceso
             (
                 string tipCod, string tipDescri,string claseProd, string lotTipo, string CodCopacking, string tipoCopacking, decimal lotNumero,
@@ -378,6 +392,7 @@ namespace CostManagement.Dominio.Entidades
                 intTidCodigo = TidCodigo.HasValue ? (int)TidCodigo.Value : null;
                 blEsDescabezado = esDescabezado && lstTiplot.Contains(strTipCod) ? true : false;
                 intProCongela = proCongela.HasValue ? (int)proCongela.Value : 0;
+                InitializerKeys();
             }
             catch (Exception ex)
             {
@@ -421,10 +436,11 @@ namespace CostManagement.Dominio.Entidades
             intCodTal = codTal;
             blExcluidoCosteo = hashLotePiso?.Contains(
                     new LoteRpcKeyReci((int)loteOrigen, Convert.ToInt32(prodCod), codTal)) ?? false;
+            InitializerKeys();
         }
+        #endregion
 
-        
-
+        #region Bloque Grafo
         /// <summary>
         /// Construye el grafo de dependencias entre lotes.
         /// Un lote DESTINO depende de un lote FUENTE cuando alguno de sus RECIBIDO
@@ -440,7 +456,7 @@ namespace CostManagement.Dominio.Entidades
         ) DetectarCadenasDependencia(IEnumerable<MatPrimaReproceso> lstMatPrimaRpc)
         {
             var indiceUnificado = lstMatPrimaRpc
-                .Select(x => new LoteRpcKeyXSec(x.intLotNumero, x.intLoteUnificado))
+                .Select(x => x.objLoteKey)
                 .Distinct()
                 .GroupBy(k => k.intLoteUnificado)
                 .ToDictionary(g => g.Key, g => g.ToList());
@@ -454,7 +470,7 @@ namespace CostManagement.Dominio.Entidades
 
             foreach (var recibido in recibidosCruzados)
             {
-                var loteDestino = new LoteRpcKeyXSec(recibido.intLotNumero, recibido.intLoteUnificado);
+                var loteDestino = recibido.objLoteKey;
 
                 foreach (var candidatoFuente in indiceUnificado[recibido.intLoteOrigen])
                 {
@@ -553,6 +569,9 @@ namespace CostManagement.Dominio.Entidades
             return (orden, lotesEnCiclo);
         }
 
+        #endregion
+
+        #region Generacion Diccionarios y Listas
         public static Dictionary<LoteRpcKeyXProdTal, decimal> GenerarPromedioPonderadoGlobal(
     List<MatPrimaReproceso> lstMatPrimaRpc)
         {
@@ -560,7 +579,7 @@ namespace CostManagement.Dominio.Entidades
                 .Where(x => x.strAgrupacion == "2. PROCESADO"
                          && x.dbCostoXSecuencial > 0
                          && x.dbLibras > 0)
-                .GroupBy(x => new LoteRpcKeyXProdTal(x.intProdCod, x.intCodTal))
+                .GroupBy(x => x.objProdTalKey)
                 .ToDictionary(
                     g => g.Key,
                     g =>
@@ -579,9 +598,9 @@ namespace CostManagement.Dominio.Entidades
                 return lstMatPrimaRpc
                 .Where(x => x.strAgrupacion == "1. RECIBIDO" && 
                          (filtroExtra == null || filtroExtra(x)))
-                .GroupBy(x => new { x.intLotNumero, x.intLoteUnificado, x.intLoteOrigen, x.intProdCod })
+                .GroupBy(x => new { x.intLotNumero, x.intLoteUnificado, x.intLoteOrigen, x.intProdCod, x.objLoteKey })
                 .ToList()
-                .GroupBy(g => new LoteRpcKeyXSec ( g.Key.intLotNumero, g.Key.intLoteUnificado ))
+                .GroupBy(g => g.Key.objLoteKey)
                 .ToDictionary(
                     g => g.Key,
                     g => g.Sum(x => x.Sum(r => r.dbCostoTotal))
@@ -600,7 +619,7 @@ namespace CostManagement.Dominio.Entidades
                 return lstMatPrimaRpc
                             .Where(x => x.strAgrupacion == "2. PROCESADO" &&
                                      (filtroExtra == null || filtroExtra(x)))
-                            .GroupBy(g => new LoteRpcKeyXSec(g.intLotNumero, g.intLoteUnificado))
+                            .GroupBy(g => g.objLoteKey)
                             .ToDictionary(
                                 g => g.Key,
                                 g => g.Sum(x => (decimal)x.dbLibras)
@@ -617,7 +636,7 @@ namespace CostManagement.Dominio.Entidades
             {
                 return lstMatPrimaRpc
                                 .Where(x => x.strProClas03 == "PT")
-                                    .GroupBy(x => new LoteRpcKeyLoteXProd(x.intLotNumero, x.intProdCod.ToString().Trim()))
+                                    .GroupBy(x => x.objLoteProdReciKey)
                                     .ToDictionary(
                                         g => g.Key,
                                         g => new Queue<List<MatPrimaReproceso>>(
@@ -660,20 +679,13 @@ namespace CostManagement.Dominio.Entidades
                 throw;
             }
         }
-        public void InitializerCostPremio(decimal? Premio)
-        {
-            decimal dcValCertPrecio = Premio ?? 0.0m;
-            dcCertificado = Math.Round(dcValCertPrecio * (decimal)dbLibras, 2);
-            dcValorCert = dcValCertPrecio;
-        }
-
 
         public static List<long> ObtenerLstLoteXRepro(IEnumerable<MatPrimaReproceso> lstMatPrimaReproceso, MatPrimaReproceso item)
         {
             return lstMatPrimaReproceso
-                        .Where(x => 
+                        .Where(x =>
                             x.strAgrupacion == "1. RECIBIDO" &&
-                            x.intLotNumero == item.intLotNumero && 
+                            x.intLotNumero == item.intLotNumero &&
                             x.intLoteUnificado == item.intLoteUnificado &&
                             x.strTipCod == item.strTipCod
                             )
@@ -681,6 +693,26 @@ namespace CostManagement.Dominio.Entidades
                         .Distinct()
                         .ToList();
         }
+        #endregion
+
+        #region Inicializadores de Valores
+        public void InitializerCostPremio(decimal? Premio)
+        {
+            decimal dcValCertPrecio = Premio ?? 0.0m;
+            dcCertificado = Math.Round(dcValCertPrecio * (decimal)dbLibras, 2);
+            dcValorCert = dcValCertPrecio;
+        }
+
+        private void InitializerKeys()
+        {
+            this.objLotRpc = new LoteRpcValKey(this.intLotNumero,this.intLoteUnificado,this.intProdCod,this.intCodTal); 
+            this.objLoteKey = new LoteRpcKeyXSec(this.intLotNumero, this.intLoteUnificado);
+            this.objValKey = new LoteRpcValKey(this.intLotNumero, this.intLoteUnificado, this.intProdCod, this.intCodTal);
+            this.objProdTalKey = new LoteRpcKeyXProdTal(this.intProdCod, this.intCodTal);
+            this.objLoteProdReciKey = new LoteRpcKeyLoteXProd(this.intLotNumero, this.intProdCod.ToString().Trim());
+        }
+        #endregion
+
     }
 
     public class PrecioFrsXMov
