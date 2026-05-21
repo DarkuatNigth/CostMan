@@ -440,34 +440,6 @@ namespace CostManagement.Infraestructura.Repository.Services
                         )
                         ).ToListAsync()
                     ;
-                //lstInfoRetracti = await objContext.TbDetalleRetractilado.AsNoTracking()
-                //    .SelectManyBatchAsync(
-                //    keySelector: dret => dret.Lote,
-                //    values: lstLote,
-                //    selector: filtered =>
-                //        from dret in filtered
-                //        join pro in objContext.TbProduc.AsNoTracking() on dret.CodProd equals pro.ProCodcor
-                //        join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
-                //        join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
-                //        where dret.Cajas > 0
-                //        group new { med, emb, dret } by new
-                //        {
-                //            dret.CodProd,
-                //            dret.Lote,
-                //            dret.CodTal,
-                //            emb.EmbPeso,
-                //            med.MedFactor
-                //        } into d
-                //        select new ParamRectrac
-                //        ( 
-                //            d.Key.CodProd,
-                //            d.Key.Lote,
-                //            d.Key.CodTal,
-                //            d.Sum(x => x.dret.CajasRetra),
-                //            d.Key.EmbPeso,
-                //            d.Key.MedFactor
-                //        )
-                //    );
                 return lstInfoRetracti;
             }
             catch (Exception ObjException)
@@ -481,14 +453,14 @@ namespace CostManagement.Infraestructura.Repository.Services
         {
             List<ParamRectrac> lstInfoRetracti;
             List<LiquidacionResultado> lstTotalResultados;
+            using var objContext = await _objContextFactory.CreateDbContextAsync();
+            objContext.Database.SetCommandTimeout(180);
+            using var transaction = await objContext.Database.BeginTransactionAsync(
+                    System.Data.IsolationLevel.ReadUncommitted
+                );
             try
             {
-                using var objContext = await _objContextFactory.CreateDbContextAsync();
-                objContext.Database.SetCommandTimeout(180);
 
-                using var transaction = await objContext.Database.BeginTransactionAsync(
-                        System.Data.IsolationLevel.ReadUncommitted
-                    );
 
                 DateTime dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(0, 0)); // 00:00:00
                 DateTime dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));     // 23:59:59
@@ -727,6 +699,8 @@ namespace CostManagement.Infraestructura.Repository.Services
             }
             catch (Exception ObjException)
             {
+                await transaction.RollbackAsync();
+                await transaction.DisposeAsync();
                 _objLogger.LogError($"Error en ObtenerMateriaPrimaFresco: {ObjException.Message}");
                 throw;
             }
@@ -735,14 +709,14 @@ namespace CostManagement.Infraestructura.Repository.Services
 
         public async Task<List<LiquidacionResultado>> ObtenerMatPrimValRpcsXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin, bool blValorizada = true)
         {
+            using var objContext = await _objContextFactory.CreateDbContextAsync();
+
+            objContext.Database.SetCommandTimeout(180);
+            using var transaction = await objContext.Database.BeginTransactionAsync(
+                    System.Data.IsolationLevel.ReadUncommitted
+                );
             try
             {
-                using var objContext = await _objContextFactory.CreateDbContextAsync();
-
-                objContext.Database.SetCommandTimeout(180);
-                using var transaction = await objContext.Database.BeginTransactionAsync(
-                        System.Data.IsolationLevel.ReadUncommitted
-                    );
                 DateTime dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(0, 0)); // 00:00
                 DateTime dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));     // 23:59
 
@@ -884,6 +858,8 @@ namespace CostManagement.Infraestructura.Repository.Services
             }
             catch (Exception objException)
             {
+                await transaction.RollbackAsync();
+                await transaction.DisposeAsync();
                 _objLogger.LogError($"Error en ObtenerMateriaPrimaReproceso: {objException.Message}");
                 throw;
             }
@@ -3669,11 +3645,25 @@ namespace CostManagement.Infraestructura.Repository.Services
             DateOnly dtFechaInicio,
             DateOnly dtFechaFin)
         {
+            List<DiarioCosto> lstMovIngresos;
             try
             {
                 var dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(0, 0));
                 var dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));
+                // Forzar command timeout para el procesamiento del ETL en tiempo real
+                //ctx.Database.SetCommandTimeout(180);
 
+                //// ── PASO 2: Ejecutar SQL Raw mapeando directamente al DTO DiarioCosto ──
+                //lstMovIngresos = await ctx.Database
+                //    .SqlQueryRaw<DiarioCosto>(
+                //        new ValueObjects().strRepMovIng4, // O la referencia de tu clase de ValueObjects: new ValueObjects().strRepMovIng4
+                //        new SqlParameter("@fi", dtFeInicio),
+                //        new SqlParameter("@ff", dtFeFin)
+                //    )
+                //    .AsNoTracking()
+                //    .ToListAsync();
+
+                //return lstMovIngresos;
                 return await (
                     from trc in ctx.TbTracamAuto
                     join tcd in ctx.TbTracadAuto on trc.TrcNumsec equals tcd.TcdNumero
@@ -3688,7 +3678,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                        && trc.TrcFecha <= dtFeFin
                        && trc.TrcEstado == "ac"
                        && trc.TrcIngegr == "I"
-                       && !new List<string>() { "IVA", "IBR", "CNEI", "REPING", "IRP", "IAT", "ILB" }.Contains(trc.TrcTipo) 
+                       && !new List<string>() { "IVA", "IBR"/*, "CNEI", "REPING", "IRP", "IAT", "ILB" */}.Contains(trc.TrcTipo)
                     group new { tcd, emb, med } by new
                     {
                         tcd.TcdLote,
@@ -3769,10 +3759,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                        && trc.TrcFecha <= dtFeFin
                        && trc.TrcEstado == "ac"
                        && trc.TrcIngegr == "E"
-                       //&& trc.TrcTipo != "EX"
-                       && !new List<string>() {"EX", "IVA", "IBR", "CNEI", "RMC",
-                           "IRP", "LAB", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", /*"REPROE", "DIR",*/
-                           "IAT", "CC", "D4", "DEV","IQ", "LB" }.Contains(trc.TrcTipo)
+                       && trc.TrcTipo != "EX"
+                       //&& !new List<string>() {"EX", "IVA", "IBR", "CNEI", "RMC",
+                       //    "IRP", "LAB", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", /*"REPROE", "DIR",*/
+                       //    "IAT", "CC", "D4", "DEV","IQ", "LB" }.Contains(trc.TrcTipo)
                     group new { tcd, emb, med, trc } by new
                     {
                         tcd.TcdLote,

@@ -29,13 +29,13 @@ var logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
 
 Log.Logger = new LoggerConfiguration()
     // 1. Silencia los Queries SQL (Nivel Información)
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", Serilog.Events.LogEventLevel.Warning)
+    //.MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", Serilog.Events.LogEventLevel.Warning)
 
-    // 2. SILENCIA LOS WARNINGS DE MODELO (Esto quitará los mensajes de Decimal y Byte Identity)
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Model.Validation", Serilog.Events.LogEventLevel.Error)
+    //// 2. SILENCIA LOS WARNINGS DE MODELO (Esto quitará los mensajes de Decimal y Byte Identity)
+    //.MinimumLevel.Override("Microsoft.EntityFrameworkCore.Model.Validation", Serilog.Events.LogEventLevel.Error)
 
-    // 3. Silencia logs de infraestructura que no sean errores
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Infrastructure", Serilog.Events.LogEventLevel.Error)
+    //// 3. Silencia logs de infraestructura que no sean errores
+    //.MinimumLevel.Override("Microsoft.EntityFrameworkCore.Infrastructure", Serilog.Events.LogEventLevel.Error)
     .Filter.ByExcluding(logEvent => logEvent.Properties.ContainsKey("SourceContext")
         && logEvent.Properties["SourceContext"].ToString().Contains("Microsoft.EntityFrameworkCore.Database.Command")) // OPCIÓN B: Excluir totalmente
     .WriteTo.Console()
