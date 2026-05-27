@@ -71,9 +71,5 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<DiarioCosto>> ObtenerMovimientosAsync(DateOnly dtFechaInicio,DateOnly dtFechaFin);
 
         Task<List<InventarioVal>> ConsultarInvValBodite(DateOnly dtFechaCorte, string strTipoInv);
-        #region Tipo Procesos Productivos
-
-        Task<List<TbTiplot>> ConsultarTipoProcesosProductivos();
-        #endregion
     }
 }

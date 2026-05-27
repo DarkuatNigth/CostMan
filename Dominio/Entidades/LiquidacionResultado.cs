@@ -197,18 +197,22 @@ namespace CostManagement.Dominio.Entidades
         public decimal? dcValorCert { get; set; }
 
         [JsonIgnore]
+        [Column("CodTal")]
         public int? intLidCodTal { get; set; }
 
         [JsonIgnore]
         public decimal? dcLiqPrecio { get; set; }
 
         [JsonIgnore]
+        [Column("ProClas06")]
         public string? strProClas06 { get; set; }
 
         [JsonIgnore]
+        [Column("ProCongela")]
         public int intProCongela { get; set; }
 
         [JsonIgnore]
+        [Column("BodEsBrine")]
         public bool blBodEsBrine { get; set; }
 
         [JsonIgnore]
@@ -260,27 +264,33 @@ namespace CostManagement.Dominio.Entidades
         public decimal? dcCostIndFij { get; set; }
 
         [JsonIgnore]
+        [Column("BodCodigo")]
 
         public string? strBodCod { get; set; }
 
         [JsonIgnore]
+        [Column("MedCodigo")]
 
         public decimal? dcMedCodigo { get; set; }
 
         [JsonIgnore]
+        [Column("EmbCodigo")]
 
         public string? strEmbCodigo { get; set; }
 
         [JsonIgnore]
+        [Column("RtaCodigo")]
 
         public decimal? dcRtaCodigo { get; set; }
 
         [JsonIgnore]
+        [Column("lotSecuencial")]
 
         public decimal dcLotSecuencial { get; set; }
 
         [NotMapped]
         [JsonIgnore]
+        [Column("LiqCopack")]
         public int intCodCopacking { get; set; }
 
         //Por ahora solo usado con fresco
@@ -292,6 +302,11 @@ namespace CostManagement.Dominio.Entidades
         [NotMapped]
         [JsonIgnore]
         public LoteRpcValKey objLotRpc { get; set; }
+
+        //Por ahora solo usado con fresco
+        [NotMapped]
+        [JsonIgnore]
+        public LotePrecio objLotPrec { get; set; }
 
         #region Constructor
         public LiquidacionResultado() { }
@@ -542,7 +557,7 @@ namespace CostManagement.Dominio.Entidades
             dcValorCert = dcValCertPrecio;
         }
 
-        private void InitializeKeys(Enum objTipoKey)
+        public  void InitializeKeys(Enum objTipoKey)
         {
             if (intLote == null || intCodProd == null || intLidCodTal == null)
                 throw new ArgumentNullException($"{nameof(intCodProd)} o {nameof(intLidCodTal)} no pueden ser null.");
@@ -558,6 +573,8 @@ namespace CostManagement.Dominio.Entidades
                         break;
                 }
             }
+
+            this.objLotPrec = new LotePrecio(this.intLote, (int)this.intCodProd, (int)this.intLidCodTal, this.strProClas02);
         }
 
         #endregion

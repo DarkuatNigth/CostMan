@@ -48,30 +48,31 @@ namespace CostManagementService.Infraestructura.Repository.Services
         {
             try
             {
-                using var objContext = await _objContextFactory.CreateDbContextAsync();
-                objContext.Database.SetCommandTimeout(180);
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+                        var objParamInicio = new SqlParameter("@fein", SqlDbType.Char, 10)
+                        { Value = dtFechaInicio.ToString("yyyy/MM/dd") };
+                        var objParamFin = new SqlParameter("@fefi", SqlDbType.Char, 10)
+                        { Value = dtFechaFin.ToString("yyyy/MM/dd") };
 
-                var objParamInicio = new SqlParameter("@fein", SqlDbType.Char, 10)
-                { Value = dtFechaInicio.ToString("yyyy/MM/dd") };
-                var objParamFin = new SqlParameter("@fefi", SqlDbType.Char, 10)
-                { Value = dtFechaFin.ToString("yyyy/MM/dd") };
+                        using var cmd = objContext.Database.GetDbConnection().CreateCommand();
+                        cmd.CommandText = "EXEC rep_tracamAuto @fein, @fefi";
+                        cmd.CommandTimeout = 180;
+                        cmd.Parameters.Add(objParamInicio);
+                        cmd.Parameters.Add(objParamFin);
 
-                using var cmd = objContext.Database.GetDbConnection().CreateCommand();
-                cmd.CommandText = "EXEC rep_tracamAuto @fein, @fefi";
-                cmd.CommandTimeout = 180;
-                cmd.Parameters.Add(objParamInicio);
-                cmd.Parameters.Add(objParamFin);
+                        if (cmd.Connection.State != ConnectionState.Open)
+                            await cmd.Connection.OpenAsync();
 
-                if (cmd.Connection.State != ConnectionState.Open)
-                    await cmd.Connection.OpenAsync();
-
-                using var reader = await cmd.ExecuteReaderAsync();
-                return DataReaderMapper.MapToList<TracamAutoResult>(reader);
+                        using var reader = await cmd.ExecuteReaderAsync();
+                        return DataReaderMapper.MapToList<TracamAutoResult>(reader);
+                    });
             }
             catch (Exception objException)
             {
-                _objLogger.LogError(
-                    $"Error en {nameof(ObtenerSpTracamAutoXRangoFecha)}: {objException.Message}");
+                ManejoLog<VentasFacturacionService>.Error(_objLogger, nameof(VentasFacturacionService), nameof(ObtenerSpTracamAutoXRangoFecha), objException);
                 throw;
             }
         }
@@ -80,29 +81,28 @@ namespace CostManagementService.Infraestructura.Repository.Services
            DateOnly dtFechaInicio,
            DateOnly dtFechaFin)
         {
-            List<TracamAutoResult> lstLbsProc = new();
             try
             {
-                using var objContext = await _objContextFactory.CreateDbContextAsync();
-                objContext.Database.SetCommandTimeout(180);
-                DateTime dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(00, 00));
-                DateTime dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+                        DateTime dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(00, 00));
+                        DateTime dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));
 
-                // ── PASO 1: ejecutar SQL raw y obtener DTOs ──
-                lstLbsProc = await objContext.Database
-                    .SqlQueryRaw<TracamAutoResult>(
-                        new ValueObjects().strRepTracamAuto,
-                        new SqlParameter("@feini", dtFeInicio),
-                        new SqlParameter("@fefin", dtFeFin)
-                    )
-                    .AsNoTracking()
-                    .ToListAsync();
-                return lstLbsProc;
+                        return await objContext.Database
+                            .SqlQueryRaw<TracamAutoResult>(
+                                new ValueObjects().strRepTracamAuto,
+                                new SqlParameter("@feini", dtFeInicio),
+                                new SqlParameter("@fefin", dtFeFin)
+                            )
+                            .AsNoTracking()
+                            .ToListAsync();
+                    });
             }
             catch (Exception objException)
             {
-                _objLogger.LogError(
-                    $"Error en {nameof(ObtenerTracamAutoXRangoFecha)}: {objException.Message}");
+                ManejoLog<VentasFacturacionService>.Error(_objLogger, nameof(VentasFacturacionService), nameof(ObtenerTracamAutoXRangoFecha), objException);
                 throw;
             }
         }
@@ -119,33 +119,34 @@ namespace CostManagementService.Infraestructura.Repository.Services
         {
             try
             {
-                using var objContext = await _objContextFactory.CreateDbContextAsync();
-                objContext.Database.SetCommandTimeout(180);
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+                        var objParamDesde = new SqlParameter("@desde", SqlDbType.VarChar, 10)
+                        { Value = dtFechaInicio.ToString("yyyy/MM/dd") };
+                        var objParamHasta = new SqlParameter("@hasta", SqlDbType.VarChar, 10)
+                        { Value = dtFechaFin.ToString("yyyy/MM/dd") };
+                        var objParamTipo = new SqlParameter("@tipo", SqlDbType.VarChar, 1)
+                        { Value = strTipo };
 
-                var objParamDesde = new SqlParameter("@desde", SqlDbType.VarChar, 10)
-                { Value = dtFechaInicio.ToString("yyyy/MM/dd") };
-                var objParamHasta = new SqlParameter("@hasta", SqlDbType.VarChar, 10)
-                { Value = dtFechaFin.ToString("yyyy/MM/dd") };
-                var objParamTipo = new SqlParameter("@tipo", SqlDbType.VarChar, 1)
-                { Value = strTipo };
+                        using var cmd = objContext.Database.GetDbConnection().CreateCommand();
+                        cmd.CommandText = "EXEC SPE_repfactpesoreal @desde, @hasta, @tipo";
+                        cmd.CommandTimeout = 180;
+                        cmd.Parameters.Add(objParamDesde);
+                        cmd.Parameters.Add(objParamHasta);
+                        cmd.Parameters.Add(objParamTipo);
 
-                using var cmd = objContext.Database.GetDbConnection().CreateCommand();
-                cmd.CommandText = "EXEC SPE_repfactpesoreal @desde, @hasta, @tipo";
-                cmd.CommandTimeout = 180;
-                cmd.Parameters.Add(objParamDesde);
-                cmd.Parameters.Add(objParamHasta);
-                cmd.Parameters.Add(objParamTipo);
+                        if (cmd.Connection.State != ConnectionState.Open)
+                            await cmd.Connection.OpenAsync();
 
-                if (cmd.Connection.State != ConnectionState.Open)
-                    await cmd.Connection.OpenAsync();
-
-                using var reader = await cmd.ExecuteReaderAsync();
-                return DataReaderMapper.MapToList<RepFactPesoRealResult>(reader);
+                        using var reader = await cmd.ExecuteReaderAsync();
+                        return DataReaderMapper.MapToList<RepFactPesoRealResult>(reader);
+                    });
             }
             catch (Exception objException)
             {
-                _objLogger.LogError(
-                    $"Error en ObtenerRepFactPesoRealXRangoFecha: {objException.Message}");
+                ManejoLog<VentasFacturacionService>.Error(_objLogger, nameof(VentasFacturacionService), nameof(ObtenerRepFactPesoRealXRangoFecha), objException);
                 throw;
             }
         }
@@ -162,35 +163,36 @@ namespace CostManagementService.Infraestructura.Repository.Services
         {
             try
             {
-                using var objContext = await _objSongFactory.CreateDbContextAsync();
-                objContext.Database.SetCommandTimeout(180);
+                return await ManejoContext<SongDbContext>.EjecutarAsync(
+                    _objSongFactory,
+                    async objContext =>
+                    {
+                        var objParamInicio = new SqlParameter("@fecini", SqlDbType.Char, 10)
+                        { Value = dtFechaInicio.ToString("yyyy/MM/dd") };
+                        var objParamFin = new SqlParameter("@fecfin", SqlDbType.Char, 10)
+                        { Value = dtFechaFin.ToString("yyyy/MM/dd") };
 
-                var objParamInicio = new SqlParameter("@fecini", SqlDbType.Char, 10)
-                { Value = dtFechaInicio.ToString("yyyy/MM/dd") };
-                var objParamFin = new SqlParameter("@fecfin", SqlDbType.Char, 10)
-                { Value = dtFechaFin.ToString("yyyy/MM/dd") };
+                        // @mov es opcional — si viene null se envía DBNull para que el SP lo trate como NULL
+                        var objParamMov = new SqlParameter("@mov", SqlDbType.VarChar, 5)
+                        { Value = strMov is null ? DBNull.Value : strMov };
 
-                // @mov es opcional — si viene null se envía DBNull para que el SP lo trate como NULL
-                var objParamMov = new SqlParameter("@mov", SqlDbType.VarChar, 5)
-                { Value = strMov is null ? DBNull.Value : strMov };
+                        using var cmd = objContext.Database.GetDbConnection().CreateCommand();
+                        cmd.CommandText = "EXEC sp_factura @fecini, @fecfin, @mov";
+                        cmd.CommandTimeout = 180;
+                        cmd.Parameters.Add(objParamInicio);
+                        cmd.Parameters.Add(objParamFin);
+                        cmd.Parameters.Add(objParamMov);
 
-                using var cmd = objContext.Database.GetDbConnection().CreateCommand();
-                cmd.CommandText = "EXEC sp_factura @fecini, @fecfin, @mov";
-                cmd.CommandTimeout = 180;
-                cmd.Parameters.Add(objParamInicio);
-                cmd.Parameters.Add(objParamFin);
-                cmd.Parameters.Add(objParamMov);
+                        if (cmd.Connection.State != ConnectionState.Open)
+                            await cmd.Connection.OpenAsync();
 
-                if (cmd.Connection.State != ConnectionState.Open)
-                    await cmd.Connection.OpenAsync();
-
-                using var reader = await cmd.ExecuteReaderAsync();
-                return DataReaderMapper.MapToList<FacturaResult>(reader);
+                        using var reader = await cmd.ExecuteReaderAsync();
+                        return DataReaderMapper.MapToList<FacturaResult>(reader);
+                    });
             }
             catch (Exception objException)
             {
-                _objLogger.LogError(
-                    $"Error en ObtenerFacturasXRangoFecha: {objException.Message}");
+                ManejoLog<VentasFacturacionService>.Error(_objLogger, nameof(VentasFacturacionService), nameof(ObtenerFacturasXRangoFecha), objException);
                 throw;
             }
         }

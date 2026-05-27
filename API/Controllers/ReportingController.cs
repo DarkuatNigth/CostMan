@@ -1,7 +1,6 @@
 ﻿using CostManagement.Aplicación.DTos;
 using CostManagement.Aplicación.Features;
 using CostManagement.Dominio.Entidades;
-using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Repository.Interface;
 using CostManagement.Infraestructura.Utils;
@@ -26,7 +25,6 @@ namespace CostManagement.API.Controllers
     [Route("[controller]")]
     public class ReportingController : ControllerBase
     {
-        private readonly CostManagementDbContext _objContext;
         private readonly ILogger<ReportingController> _objLogger;
         private readonly IExcelExportService _excelService;
         private readonly CalculoCostosFeature _objCostoMateriaPrima;
@@ -35,14 +33,12 @@ namespace CostManagement.API.Controllers
             ILogger<ReportingController> objLogger,
             CalculoCostosFeature objCostoMateriaPrima,
             OperacionComercialFeature objOperacionComercial,
-            IExcelExportService excelService,
-            CostManagementDbContext objContext)
+            IExcelExportService excelService)
         {
             _objLogger = objLogger;
             _objCostoMateriaPrima = objCostoMateriaPrima;
             _objOperacionComercial = objOperacionComercial;
             _excelService = excelService;
-            _objContext = objContext;
         }
 
         [HttpGet("materia-prima")]
