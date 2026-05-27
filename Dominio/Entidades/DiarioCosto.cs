@@ -13,8 +13,8 @@ namespace CostManagement.Aplicación.DTos
         [Column("Tipo Saldo")]
         public string strTipo { get; set; }
 
-        [JsonIgnore]
-        public int intTipoMovInv { get; set; }
+        //[JsonIgnore]
+        //public int intTipoMovInv { get; set; }
 
         [Column("Fecha Saldo")]
         public DateTime dtFechaMov { get; set; }
@@ -183,73 +183,62 @@ namespace CostManagement.Aplicación.DTos
         public static ConcurrentDictionary<PromXProdTal, decimal> ConstruirDictPromedioFrsRpcSld(
             List<LiquidacionResultado> lstLiq, List<MatPrimaReproceso> lstRpc, List<DiarioCosto> lstSld)
         {
-            // Validación de entrada para evitar excepciones de referencia nula
             if (lstLiq == null || !lstLiq.Any()) return new ConcurrentDictionary<PromXProdTal, decimal>();
 
-            // 1) Pre-agregar FRS por (producto, talla)
+            // 1) Pre-agregar FRS limpiando espacios
             var frsAgg = lstLiq
                 .GroupBy(f => new PromXProdTal(f.intCodProd.ToString().Trim(), (int)f.intLidCodTal))
-                .ToDictionary(
-                    g => g.Key,
-                    g => new {
-                        Libras = g.Sum(f => (decimal)f.dcLibras ),
-                        TotalDol = g.Sum(f => (decimal)(f.dcTotalDol ?? 0))
-                    });
+                .ToDictionary(g => g.Key, g => new {
+                    dcLibras = g.Sum(f => (decimal)(f.dcLibras)),
+                    dcTotalDol = g.Sum(f => (decimal)(f.dcTotalDol ?? 0))
+                });
 
-            // 2) Pre-agregar RPC por (producto, talla)
+            // 2) Pre-agregar RPC filtrando registros que ya tengan costo final calculado si no se requiere sumarlos
             var rpcAgg = (lstRpc ?? Enumerable.Empty<MatPrimaReproceso>())
                 .GroupBy(r => new PromXProdTal(r.intProdCod.ToString().Trim(), r.intCodTal))
-                .ToDictionary(
-                    g => g.Key,
-                    g => new {
-                        Libras = g.Sum(r => (decimal)r.dbLibras),
-                        TotalDol = g.Sum(r => (decimal)r.dbCostoTotal)
-                    });
+                .ToDictionary(g => g.Key, g => new {
+                    dcLibras = g.Sum(r => (decimal)r.dbLibras),
+                    dcTotalDol = g.Sum(r => (decimal)r.dbCostoTotal)
+                });
 
-            // 3) Pre-agregar SLD (solo tipo "SALDO") por (producto, talla)
+            // 3) Pre-agregar SLD (Saldo Inicial)
             var sldAgg = (lstSld ?? Enumerable.Empty<DiarioCosto>())
                 .Where(s => s.strCodTip.Equals("SALDO", StringComparison.OrdinalIgnoreCase))
                 .GroupBy(s => new PromXProdTal(s.strProCodcor.Trim(), (int)s.stTalCodigo))
-                .ToDictionary(
-                    g => g.Key,
-                    g => new {
-                        Libras = g.Sum(s => s.dcLibras ),
-                        TotalDol = g.Sum(s => s.dcCostoTot)
-                    });
+                .ToDictionary(g => g.Key, g => new {
+                    dcLibras = g.Sum(s => s.dcLibras),
+                    dcTotalDol = g.Sum(s => s.dcCostoTot)
+                });
 
-
-            // 4) UNIÓN de todas las claves de las tres fuentes
             var todasLasClaves = new HashSet<PromXProdTal>(frsAgg.Keys);
             todasLasClaves.UnionWith(rpcAgg.Keys);
             todasLasClaves.UnionWith(sldAgg.Keys);
 
-            // 5) Recorrer todas las claves y sumar lo que exista en cada fuente
             var result = new ConcurrentDictionary<PromXProdTal, decimal>();
 
             foreach (var key in todasLasClaves)
             {
-                decimal libras = 0m;
-                decimal totalDol = 0m;
+                decimal dcLibrasAcum = 0m;
+                decimal dcDolaresAcum = 0m;
 
                 if (frsAgg.TryGetValue(key, out var frs))
                 {
-                    libras += frs.Libras;
-                    totalDol += frs.TotalDol;
+                    dcLibrasAcum += frs.dcLibras;
+                    dcDolaresAcum += frs.dcTotalDol;
                 }
-
                 if (rpcAgg.TryGetValue(key, out var rpc))
                 {
-                    libras += rpc.Libras;
-                    totalDol += rpc.TotalDol;
+                    // CRÍTICO: Si detectas que RPC está duplicando a FRS, implementa una lógica de precedencia aquí
+                    dcLibrasAcum += rpc.dcLibras;
+                    dcDolaresAcum += rpc.dcTotalDol;
                 }
-
                 if (sldAgg.TryGetValue(key, out var sld))
                 {
-                    libras += sld.Libras;
-                    totalDol += sld.TotalDol;
+                    dcLibrasAcum += sld.dcLibras;
+                    dcDolaresAcum += sld.dcTotalDol;
                 }
 
-                result[key] = libras > 0 ? totalDol / libras : 0m;
+                result[key] = dcLibrasAcum > 0 ? dcDolaresAcum / dcLibrasAcum : 0m;
             }
 
             return result;
@@ -261,15 +250,21 @@ namespace CostManagement.Aplicación.DTos
             List<DiarioCosto> lst)
         {
             if (!lst.Any()) return new ConcurrentDictionary<PromLoteXProdTal, decimal>();
-            return new ConcurrentDictionary<PromLoteXProdTal, decimal>(
-                (from frs in lst
-                 where frs.strCodTip.Equals("SALDO", StringComparison.OrdinalIgnoreCase)
-                 group frs by new
-                 { frs.intLote, frs.strProCodcor, frs.stTalCodigo } into g
-                 select g.First()).ToDictionary(
-                                   frs => new PromLoteXProdTal(frs.intLote, frs.strProCodcor.ToString().Trim(), (int)frs.stTalCodigo),
-                                   frs => (decimal)frs.dcCostoUnit)
-                    );
+            // Filtrar y agrupar asegurando que no sume de más si hay fragmentación de registros
+            var dicResultados = lst
+                .Where(x => x.strCodTip.Equals("SALDO", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(x => new { x.intLote, strProd = x.strProCodcor.Trim(), intTalla = (int)x.stTalCodigo })
+                .ToDictionary(
+                    g => new PromLoteXProdTal(g.Key.intLote, g.Key.strProd, g.Key.intTalla),
+                    g => {
+                        // En lugar de g.First(), calculamos el costo unitario real promedio del saldo del lote
+                        decimal dcLibrasTot = g.Sum(x => x.dcLibras);
+                        decimal dcDolaresTot = g.Sum(x => x.dcCostoTot);
+                        return dcLibrasTot > 0 ? dcDolaresTot / dcLibrasTot : g.First().dcCostoUnit;
+                    }
+                );
+
+            return new ConcurrentDictionary<PromLoteXProdTal, decimal>(dicResultados);
         }
 
 

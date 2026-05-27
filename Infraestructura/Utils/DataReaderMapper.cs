@@ -1,11 +1,19 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
 using System.Data.Common;
+using System.Diagnostics;
 using System.Reflection;
 
 namespace CostManagement.Infraestructura.Utils
 {
     public static class DataReaderMapper
     {
+        // Nuevo atributo — crear en una carpeta de Utils o Attributes
+        [AttributeUsage(AttributeTargets.Property)]
+        public class ColumnOccurrenceAttribute : Attribute
+        {
+            public int Occurrence { get; }
+            public ColumnOccurrenceAttribute(int occurrence) => Occurrence = occurrence;
+        }
         public static List<T> MapToList<T>(this DbDataReader reader) where T : new()
         {
             var entities = new List<T>();
@@ -32,11 +40,11 @@ namespace CostManagement.Infraestructura.Utils
 
                     int index;
 
-                    // si la propiedad termina en "2" usar segunda columna
-                    if (prop.Name.EndsWith("2"))
-                        index = columnLookup[columnName].Skip(1).FirstOrDefault();
-                    else
-                        index = columnLookup[columnName].First();
+                    var occurrenceAttr = prop.GetCustomAttribute<ColumnOccurrenceAttribute>();
+                    int skip = (occurrenceAttr != null && columnLookup[columnName].Count() > occurrenceAttr.Occurrence)
+                        ? occurrenceAttr.Occurrence
+                        : 0;
+                    index = columnLookup[columnName].Skip(skip).First();
 
                     var value = reader.GetValue(index);
 
@@ -44,6 +52,13 @@ namespace CostManagement.Infraestructura.Utils
                         continue;
 
                     var propType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+
+                    // Agregar esto antes del Convert.ChangeType:
+                    if (propType == typeof(DateOnly) && value is DateTime dt)
+                    {
+                        prop.SetValue(obj, DateOnly.FromDateTime(dt));
+                        continue;
+                    }
 
                     var safeValue = Convert.ChangeType(value, propType);
 

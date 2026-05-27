@@ -701,8 +701,8 @@ namespace CostManagement.Aplicación.Features
                 var tareaRepro = _objMateriaPrima.ReporteReproPlanProc(dtFechaInicio, dtFechaFin);
                 var TareaTarifaProceso = _objProcesoParametro.ConsultarProcesoTarifa(dtFechaCorteCorr);
                 var tareaFresco =  _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio, dtFechaFin);
-                await ObtenerValProceso(dtFechaInicio, objDataProceso);
-                await Task.WhenAll(tareaRepro, TareaTarifaProceso, tareaFresco);
+                //await ObtenerValProceso(dtFechaInicio, objDataProceso);
+                await Task.WhenAll(tareaRepro, TareaTarifaProceso, tareaFresco, ObtenerValProceso(dtFechaInicio, objDataProceso));
                 objDataProceso.lstLiqFresco = await tareaFresco;
                 objDataProceso.lstLiqRepro = await tareaRepro;
                 objDataProceso.lstProcesoTarifa = await TareaTarifaProceso;

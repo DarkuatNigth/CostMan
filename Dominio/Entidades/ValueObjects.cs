@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using CostManagement.Infraestructura.EF_Core;
+using System.Collections.Concurrent;
 
 namespace CostManagement.Dominio.Entidades
 {
