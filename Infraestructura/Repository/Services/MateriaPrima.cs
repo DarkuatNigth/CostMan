@@ -468,13 +468,9 @@ namespace CostManagement.Infraestructura.Repository.Services
 
                         foreach (var item in lstTotalResultados)
                         {
-                            //if (dicPrecio.TryGetValue(item.objLotPrec, out decimal precioEncontrado))
-                            //{
-                            //    item.dcLiqPrecio = precioEncontrado;
-                            //    item.InitializePrecioCompraAndTotalDol();
-                            //}
-                            if (item.dcLiqPrecio != null)
+                            if (item.dcPrecioCompra != null)
                             {
+                                item.dcLiqPrecio = (decimal?)item.dcPrecioCompra;
                                 item.InitializePrecioCompraAndTotalDol();
                             }
                             if ((item.dcLibrasRetractilado ?? 0) != 0) continue;
@@ -500,7 +496,7 @@ namespace CostManagement.Infraestructura.Repository.Services
         {
             try
             {
-                return await ManejoContext<CostManagementDbContext>.EjecutarEnTransaccionAsync(
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
                     _objContextFactory,
                     async objContext =>
                     {
@@ -521,8 +517,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         lstTotalResultados = lstTotalResultados.Where(obj => obj.strTipoLiq != "LIQ_PFR").ToList();
                         lstTotalResultados.ForEach(r => r.InitializeKeys(enmTipoMerge.Reproceso));
                         return lstTotalResultados;
-                    },
-                    nivelAislamiento: IsolationLevel.ReadUncommitted);
+                    });
             }
             catch (Exception objException)
             {
