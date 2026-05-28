@@ -23,10 +23,11 @@ namespace CostManagement.Infraestructura.Utils
             var objFrame = new StackTrace(objException, true).GetFrame(0);
             int intLinea = objFrame?.GetFileLineNumber() ?? 0;
             string strArchivo = Path.GetFileName(objFrame?.GetFileName()) ?? "N/D";
+            string strMessage = objException.InnerException?.Message ?? objException.Message;
             objLogger.LogError(
                 objException,
                 "[{Clase}].[{Metodo}] Ocurrió un error: {Mensaje} | Tipo: {Tipo} | Archivo: {Archivo} | Línea: {Linea}",
-                strClase, strMetodo, objException.Message,
+                strClase, strMetodo, strMessage,
                 objException.GetType().Name, strArchivo, intLinea);
         }
     }
