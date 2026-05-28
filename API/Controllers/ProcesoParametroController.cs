@@ -2,6 +2,7 @@
 using CostManagement.Aplicación.Features;
 using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.Repository.Interface;
+using CostManagement.Infraestructura.Repository.Services;
 using CostManagement.Infraestructura.Utils;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -134,11 +135,12 @@ namespace CostManagement.API.Controllers
             }
             catch (Exception objException)
             {
-                _objLogger.LogError($"[ProcesoParametroController].[Guardar] Error: {objException.Message}");
+                string strMessage = objException.InnerException?.Message ?? objException.Message;
+                ManejoLog<ProcesoParametroController>.Error(_objLogger, nameof(ProcesoParametroController), nameof(GuardarParamProcPfr), objException);
                 return BadRequest(new ApiResponse<string>
                 {
                     blStatus = false,
-                    strMensaje = "Error al guardar: " + objException.Message
+                    strMensaje = "Error al guardar: " + strMessage
                 });
             }
         }

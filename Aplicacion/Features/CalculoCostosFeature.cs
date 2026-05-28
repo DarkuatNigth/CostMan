@@ -4,6 +4,8 @@ using CostManagement.Dominio.Reglas;
 using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Repository.Interface;
+using CostManagement.Infraestructura.Repository.Services;
+using CostManagement.Infraestructura.Utils;
 using CostManagementService.Aplicación.DTos;
 using CostManagementService.Dominio.Reglas;
 using DocumentFormat.OpenXml.Drawing.Charts;
@@ -740,7 +742,7 @@ namespace CostManagement.Aplicación.Features
             }
             catch (Exception objException)
             {
-                _objLogger.LogError($"[CalculoCostosFeature].[RegistrarParametroProceso] Ocurrio un error: {objException.Message}");
+                ManejoLog<CalculoCostosFeature>.Error(_objLogger, nameof(CalculoCostosFeature), nameof(RegistrarParamProcPfr), objException);
                 throw;
             }
         }
