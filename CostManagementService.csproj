@@ -9,6 +9,13 @@
     <DockerfileContext>.</DockerfileContext>
   </PropertyGroup>
 
+	<ItemGroup>
+		<Content Update="web.config">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+			<CopyToPublishDirectory>Always</CopyToPublishDirectory>
+		</Content>
+	</ItemGroup>
+	
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="8.0.1" />
