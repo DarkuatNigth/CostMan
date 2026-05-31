@@ -2,6 +2,7 @@
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagementService.Aplicación.DTos;
+using CostManagementService.Dominio.Entidades;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -19,6 +20,8 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<ResumenEstiloLbsDto>> ObtenerResumenEstiloLbsXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
         Task<List<LiquidacionResultado>> ObtenerMatPrimValFrsXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin, bool blValorizada = true);
+
+        Task<List<LiquidacionResDto>> ObtenerMatPrimValFrsXRangoFechaPrt(DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
         Task<List<LiquidacionResultado>> ObtenerMatPrimValRpcsXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin, bool blValorizada = true);
 

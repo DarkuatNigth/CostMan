@@ -25,6 +25,9 @@ namespace CostManagement.Dominio.Entidades
         [ConfigurationKeyName("ValProdTerm")]
         public List<string> lstProdTerm { get; set; }
 
+        [ConfigurationKeyName("RutaReporteCostos")]
+        public string strRutaReporteCostos { get; set; } 
+
         [ConfigurationKeyName("ValEftGrupo")]
         public List<string> lstNotInGrupoItem{ get; set; }
     }

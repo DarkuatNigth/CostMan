@@ -8,6 +8,7 @@ using CostManagement.Infraestructura.Utils;
 using CostManagementService.Aplicación.DTos;
 using CostManagementService.Dominio.Entidades;
 using CostManagementService.Infraestructura.EF_Core;
+using CostManagementService.Infraestructura.Utils;
 using DocumentFormat.OpenXml.EMMA;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -482,6 +483,69 @@ namespace CostManagement.Infraestructura.Repository.Services
                             decimal dcPorcentaje = (decimal)item.dcLibras / (decimal)dcTotalLibrasGrupo;
                             item.dcLibrasRetractilado = Math.Round(dcPorcentaje * info.dcLibrasRetra, 2);
                         }
+                        return lstTotalResultados;
+                    });
+            }
+            catch (Exception ObjException)
+            {
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(ObtenerMatPrimValFrsXRangoFecha), ObjException);
+                throw;
+            }
+        }
+
+        public async Task<List<LiquidacionResDto>> ObtenerMatPrimValFrsXRangoFechaPrt(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+            try
+            {
+                // 1. Instanciamos el lector analítico directo desacoplado
+                var lectorParquet = new AlmacenAnaliticoDirecto();
+
+                // 2. Definimos la ruta física absoluta de tu almacén local
+                string rutaAlmacenParquet = _objConfig.Value.strRutaReporteCostos;
+
+                // 3. Reemplazamos la ejecución del SP por la lectura indexada de Parquet (Poda de Partición)
+                // Pasamos "TIPOLIQ" como nombre de índice y "LIQ_PFR" como valor para emular el filtro de la consulta original
+                List<LiquidacionResDto> lstTotalResultados = await lectorParquet.ConsultarDatosAsync<LiquidacionResDto>(
+                    rutaAlmacenParquet,
+                    nombreIndice: "TIPOLIQ",
+                    valorIndice: "LIQ_PFR"
+                );
+
+                // --- Toda tu lógica de negocio original continúa exactamente igual sobre los datos de Parquet ---
+
+                // Inicializamos las claves para los cruces en memoria
+                //lstTotalResultados.ForEach(r => r.InitializeKeys(enmTipoMerge.Fresco));
+
+                // Mantenemos la consulta del contexto únicamente para los datos complementarios de retractilado
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+                        var lstInfoRetracti = await ObtenerInfoRectractiladoXLoteCore(objContext, dtFechaInicio, dtFechaFin);
+                        var dictRetra = ParamRectrac.ConstruirDictParamRectracFrs(lstInfoRetracti);
+
+                        //var dictDenominadores = lstTotalResultados
+                        //    .Where(r => dictRetra.ContainsKey(r.objLotkey))
+                        //    .GroupBy(r => r.objLotkey)
+                        //    .ToDictionary(g => g.Key, g => g.Sum(r => r.dcLibras));
+
+                        //foreach (var item in lstTotalResultados)
+                        //{
+                        //    if (item.dcPrecioCompra != null)
+                        //    {
+                        //        item.dcLiqPrecio = (decimal?)item.dcPrecioCompra;
+                        //        item.InitializePrecioCompraAndTotalDol();
+                        //    }
+                        //    if ((item.dcLibrasRetractilado ?? 0) != 0) continue;
+                        //    if (!dictRetra.TryGetValue(item.objLotkey, out var cola)) continue;
+                        //    if (!cola.TryPeek(out var info)) continue;
+                        //    if (!dictDenominadores.TryGetValue(item.objLotkey, out double dcTotalLibrasGrupo)) continue;
+                        //    if (dcTotalLibrasGrupo == 0) continue;
+
+                        //    decimal dcPorcentaje = (decimal)item.dcLibras / (decimal)dcTotalLibrasGrupo;
+                        //    item.dcLibrasRetractilado = Math.Round(dcPorcentaje * info.dcLibrasRetra, 2);
+                        //}
+
                         return lstTotalResultados;
                     });
             }

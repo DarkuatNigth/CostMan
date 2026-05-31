@@ -115,6 +115,9 @@ namespace CostManagement.Aplicación.Features
             DataProcesoParam objDataProceso = new();
             try
             {
+
+                var frs = await _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio, dtFechaFin);
+                var tareaFrescoPrt = await _objMateriaPrima.ObtenerMatPrimValFrsXRangoFechaPrt(dtFechaInicio, dtFechaFin);
                 var TareaFrsVal = _objMateriaPrima.ObtenerLstMatPrimValorizada(dtFechaInicio, dtFechaFin);
                 var tareaFrs = _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio, dtFechaFin);
                 await Task.WhenAll(TareaFrsVal, tareaFrs);
@@ -695,14 +698,17 @@ namespace CostManagement.Aplicación.Features
             DataProcesoParam objDataProceso = new DataProcesoParam();
             try
             {
+
                 //Se obtiene tipo de proceso cocido para entero
                 lstProdCocido = await _objProcesoParametro.ConsultarCatalogoXDes("Tipo Proceso Cocido");
                 dtFechaCorteCorr = DateOnly.FromDateTime(dtFechaCorte);
                 dtFechaInicio = new DateOnly(dtFechaCorte.Year, dtFechaCorte.Month, 1);
                 dtFechaFin = new DateOnly(dtFechaCorte.Year, dtFechaCorte.Month, dtFechaCorte.Day);
+                var frs = await _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio, dtFechaFin);
+                var tareaFrescoPrt = await _objMateriaPrima.ObtenerMatPrimValFrsXRangoFechaPrt(dtFechaInicio, dtFechaFin);
                 var tareaRepro = _objMateriaPrima.ReporteReproPlanProc(dtFechaInicio, dtFechaFin);
                 var TareaTarifaProceso = _objProcesoParametro.ConsultarProcesoTarifa(dtFechaCorteCorr);
-                var tareaFresco =  _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio, dtFechaFin);
+                var tareaFresco = _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio, dtFechaFin);
                 //await ObtenerValProceso(dtFechaInicio, objDataProceso);
                 await Task.WhenAll(tareaRepro, TareaTarifaProceso, tareaFresco, ObtenerValProceso(dtFechaInicio, objDataProceso));
                 objDataProceso.lstLiqFresco = await tareaFresco;
