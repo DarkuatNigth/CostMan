@@ -468,11 +468,11 @@ namespace CostManagement.Infraestructura.Repository.Services
 
                         foreach (var item in lstTotalResultados)
                         {
-                            if (item.dcPrecioCompra != null)
-                            {
-                                item.dcLiqPrecio = (decimal?)item.dcPrecioCompra;
-                                item.InitializePrecioCompraAndTotalDol();
-                            }
+                            //if (item.dcPrecioCompra != null)
+                            //{
+                            //    item.dcLiqPrecio = (decimal?)item.dcPrecioCompra;
+                            //    item.InitializePrecioCompraAndTotalDol();
+                            //}
                             if ((item.dcLibrasRetractilado ?? 0) != 0) continue;
                             if (!dictRetra.TryGetValue(item.objLotkey, out var cola)) continue;
                             if (!cola.TryPeek(out var info)) continue;
