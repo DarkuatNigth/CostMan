@@ -441,6 +441,7 @@ namespace CostManagement.API.Controllers
             List<RptVentaVsFactura> lstReportVent;
             List<DiarioCosto> lstDiarioCost;
             DataTable dataTable = new DataTable();
+            DataGeneralResult excelBytes = null;
             try
             {
 
@@ -497,22 +498,27 @@ namespace CostManagement.API.Controllers
                         break;
 
                     default:
-                        throw new ArgumentException("Tipo de reporte no válido", nameof(request.sp));
+                        excelBytes = await  _excelService.ObtenerReporteExcel(request);
+                        break;
+                        //throw new ArgumentException("Tipo de reporte no válido", nameof(request.sp));
                 }
 
+                if (excelBytes == null)
+                {
+                    excelBytes = await _excelService.DataGeneralExcel(request, dataTable);
 
-                DataGeneralResult excelBytes = await _excelService.DataGeneralExcel(request, dataTable);
-
+                }
                 return File(excelBytes.Data.ToArray(),
                 "application/vnd.openxmlformats-officedocument.spreadshteetml.sheet",
                 $"{request.title}.xlsx");
             }
             catch (Exception objException)
             {
+                string strMessage = objException.InnerException?.Message ?? objException.Message;
                 return BadRequest(new ApiResponse<string>
                 {
                     blStatus = false,
-                    strMensaje = "Error al generar Excel: " + objException.Message,
+                    strMensaje = "Error al generar Excel: " + strMessage,
                     objData = ""
                 });
             }

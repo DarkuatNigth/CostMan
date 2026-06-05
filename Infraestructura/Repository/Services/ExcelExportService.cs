@@ -1,20 +1,114 @@
 ﻿using ClosedXML.Excel;
 using CostManagement.Aplicación.DTos;
 using CostManagement.Dominio.Entidades;
+using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.Repository.Interface;
+using CostManagement.Infraestructura.Utils;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
+using System.Data.Common;
 using System.Drawing;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace CostManagement.Infraestructura.Repository.Services
 {
     public class ExcelExportService : IExcelExportService
     {
+        private readonly IDbContextFactory<CostManagementDbContext> _objContextFactory;
+        private readonly IDbContextFactory<SongDbContext> _objSongFactory;
+        private readonly ILogger<ExcelExportService> _objLogger;
+        private readonly IOptions<ParametrosConfig> _objConfig;
+        public ExcelExportService(
+                ILogger<ExcelExportService> objLogger,
+                IOptions<ParametrosConfig> objConfig,
+                IDbContextFactory<CostManagementDbContext> objContextFactory,
+                IDbContextFactory<CostosDbContext> objCostosFactory,
+                IDbContextFactory<SongDbContext> objSongFactory
+            )
+        {
+            _objLogger = objLogger;
+            _objContextFactory = objContextFactory;
+            _objSongFactory = objSongFactory;
+            _objConfig = objConfig;
+        }
+
+        public async Task<DataGeneralResult> ObtenerReporteExcel(DataGeneralRequest dataGeneralRequest)
+        {
+
+            DataGeneralResult result = new DataGeneralResult { Success = false };
+            SqlDbType type;
+            result.Success = false;
+
+            try
+            {
+                await using var context = _objContextFactory.CreateDbContext();
+                using var connection = context.Database.GetDbConnection();
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                // Construir los parámetros nombrados para el batch
+                var paramNames = dataGeneralRequest.modelParam
+                    .Where(item => item.name != "i_empresa")
+                    .Select(item => $"@{item.name} = @{item.name}")
+                    .ToList();
+
+                command.CommandText = $"EXEC {dataGeneralRequest.sp} {string.Join(", ", paramNames)}";
+                command.CommandType = CommandType.Text;
+
+                foreach (modelParamSQL item in dataGeneralRequest.modelParam)
+                {
+                    if (item.name == "i_empresa") continue;
+                    var objType = (SqlDbType)Enum.Parse(typeof(SqlDbType), item.type, true);
+                    command.Parameters.Add(new SqlParameter(item.name, objType)
+                    {
+                        Value = item.value == null ? DBNull.Value : (object)item.value.ToString()
+                    });
+                }
+
+                var reader = await command.ExecuteReaderAsync();
+                List<DataTable> resultList = new List<DataTable>();
+
+                try
+                {
+                    do
+                    {
+                        if (reader.HasRows)
+                        {
+                            var dataTable = new DataTable();
+                            dataTable.Load(reader);
+                            resultList.Add(dataTable);
+
+                            if (reader.IsClosed) break;
+                        }
+                    } while (await reader.NextResultAsync());
+                }
+                catch (Exception ObjException)
+                {
+                    connection.Close();
+                    ManejoLog<ExcelExportService>.Error(_objLogger, nameof(ExcelExportService), nameof(ObtenerReporteExcel), ObjException);
+                    throw;
+                }
+
+                if (resultList.Any())
+                {
+                    result = await DataGeneralExcel(dataGeneralRequest, resultList.First());
+                }
+
+                return result;
+            }
+            catch (Exception ObjException)
+            {
+                ManejoLog<ExcelExportService>.Error(_objLogger, nameof(ExcelExportService), nameof(ObtenerReporteExcel), ObjException);
+                throw;
+            }
+        }
+
         public async Task<DataGeneralResult> DataGeneralExcel(DataGeneralRequest dataGeneralRequest, DataTable dataTable)
         {
             DataGeneralResult result = new DataGeneralResult { Success = false };
