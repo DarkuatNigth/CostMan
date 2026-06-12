@@ -513,7 +513,6 @@ namespace CostManagement.Dominio.Reglas
 
         private static void AplicarProcesoPrimario(LiquidacionResultado objLiq, CostosUnitarios c)
         {
-            if (objLiq.intCodCopacking != 0 && objLiq.strPlanta != "SONGA") return;
             decimal libras = (decimal)objLiq.dcLibras;
 
             objLiq.ProcesoPrimario.dcRecepcion = Math.Round(libras * c.dcRecepcion, 4);
@@ -528,7 +527,6 @@ namespace CostManagement.Dominio.Reglas
 
         private static void AplicarProcesoPresentacion(LiquidacionResultado liq, CostosUnitarios c)
         {
-            if (liq.intCodCopacking != 0 && liq.strPlanta != "SONGA") return;
             liq.ProcesoPresentacion.dcDecorado = Math.Round((decimal)liq.dcLibrasDecorado * c.dcDecorado, 4);
             liq.ProcesoPresentacion.dcRetractilado = Math.Round((decimal)(liq.dcLibrasRetractilado ?? 0) * c.dcRetractilado, 4);
 
@@ -539,7 +537,6 @@ namespace CostManagement.Dominio.Reglas
 
         private static void AplicarProcesoCongelacion(LiquidacionResultado liq, CostosUnitarios c, List<int> lstCongTunel)
         {
-            if (liq.intCodCopacking != 0 && liq.strPlanta != "SONGA") return;
             decimal libras = (decimal)liq.dcLibras;
 
             // Brine
@@ -575,7 +572,6 @@ namespace CostManagement.Dominio.Reglas
 
         private static void AplicarProcesoSecundario(LiquidacionResultado liq, CostosUnitarios c)
         {
-            if (liq.intCodCopacking != 0 && liq.strPlanta != "SONGA") return;
             liq.ProcesoSecundario.dcPelado = 0;
             liq.ProcesoSecundario.dcHidratacion = 0;
             liq.ProcesoSecundario.dcCocido = 0;
@@ -599,7 +595,6 @@ namespace CostManagement.Dominio.Reglas
 
         private static void AplicarCostosDirectos(LiquidacionResultado liq, CostosUnitarios c)
         {
-            if (liq.intCodCopacking != 0 && liq.strPlanta != "SONGA") return;
             decimal libras = (decimal)liq.dcLibras;
 
             liq.ProcesoCostFijo.dcCostoVariable = Math.Round(libras * c.dcCostDirectoVar, 4);
@@ -611,7 +606,6 @@ namespace CostManagement.Dominio.Reglas
 
         private static void AplicarCostosIndirectos(LiquidacionResultado liq, CostosUnitarios c)
         {
-            if (liq.intCodCopacking != 0 && liq.strPlanta != "SONGA") return;
             
             decimal libras = (decimal)liq.dcLibras;
 
