@@ -62,6 +62,7 @@ namespace CostManagement.Dominio.Reglas
         /// </summary>
         public void AsignarCostoProcesoFrs(DataProcesoParam objDataProceso)
         {
+            ProcesoResultadoDto objMatEmpaqueFrs;
             try
             {
                 var dicTotales = new Dictionary<string, decimal>();
@@ -70,6 +71,21 @@ namespace CostManagement.Dominio.Reglas
                 decimal sumRloNetas = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcLibras);
                 decimal sumRloProCabCol = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcLibras);
                 decimal dcSumCopacking = (decimal)objDataProceso.lstLiqFresco.Where(x => x.intCodCopacking > 0 && x.strPlanta != "SONGA").Sum(x => x.dcLibras);
+                decimal dcSumMatEmpaque = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcCostoTotalMatEmp ?? 0);
+                objMatEmpaqueFrs = new ProcesoResultadoDto
+                {
+                    intCodigo = objDataProceso.lstProcesoFrs
+                .LastOrDefault(obj => obj.intCodigo > 0)?.intCodigo ?? 0,
+                    intCodDet = 0,
+                    strEstado = "AC",
+                    strDescripcion = "Material Empaque",
+                    blEditable = false,
+                    strTipoLote = "RPC",
+                    dcValor = dcSumMatEmpaque,
+                    dcLibras = sumRloNetas,
+                    dcCostUnitario = dcSumMatEmpaque != 0 ? dcSumMatEmpaque / sumRloNetas : 0,
+                };
+                objDataProceso.lstProcesoFrs.Add(objMatEmpaqueFrs);
 
                 dicTotales["Recepcion"] = sumRloNetas;
                 dicTotales["Excedente M.E."] = sumRloProCabCol;
@@ -191,6 +207,9 @@ namespace CostManagement.Dominio.Reglas
         /// </summary>
         public void AsignarCostoProcesoRpc(DataProcesoParam objDataProceso)
         {
+            ProcesoResultadoDto objMatEmpaqueRpc;
+            try
+            {
             var dicTotales = new Dictionary<string, decimal>();
             List<string> lstNotCostConge = new List<string>() { /*"BP",*/
                     "CAM","RLL","R1","CDI","R2","REC","LB04","RPY","R3","RS","DV","RVVL","BDP","VE","VR"
@@ -200,6 +219,21 @@ namespace CostManagement.Dominio.Reglas
                 .Where(x => x.strLotTipo == "RE" && _lstlbsProcPrim.Contains(x.strTipCod))
                 .Sum(obj => obj.dbLibras);
             var dclbsValAgg = (decimal)objDataProceso.lstLiqRepro.Where(x => x.strLotTipo == "VA" && String.IsNullOrEmpty(x.strRecNombre)).Sum(obj => obj.dbLibras);
+                decimal dcSumMatEmpaque = (decimal)objDataProceso.lstLiqRepro.Sum(x => x.dcCostoTotalMatEmp ?? 0);
+                objMatEmpaqueRpc = new ProcesoResultadoDto
+                {
+                    intCodigo = objDataProceso.lstProcesoRpc
+                .LastOrDefault(obj => obj.intCodigo > 0)?.intCodigo ?? 0,
+                    intCodDet = 0,
+                    strEstado = "AC",
+                    strDescripcion = "Material Empaque",
+                    blEditable = false,
+                    strTipoLote = "RPC",
+                    dcValor = dcSumMatEmpaque,
+                    dcLibras = dcCostProcPrim,
+                    dcCostUnitario = dcSumMatEmpaque != 0 ? dcSumMatEmpaque / dcCostProcPrim : 0,
+                };
+                objDataProceso.lstProcesoRpc.Add(objMatEmpaqueRpc);
 
             dicTotales["Recepcion"] = dcCostProcPrim;
             dicTotales["Excedente M.E."] = dcCostProcPrim;
