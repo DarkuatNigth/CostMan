@@ -54,7 +54,6 @@ namespace CostManagement.Dominio.Entidades
         public string? strPaiDescri { get; set; }
 
         [Column("Clase")]
-        [JsonIgnore]
         public string? strProClas02 { get; set; }
 
         [Column("pro_ClasePago")]
@@ -104,6 +103,9 @@ namespace CostManagement.Dominio.Entidades
 
         [Column("Tipo Cola")]
         public string? strTipCola { get; set; }
+
+        [Column("Empresa Paga")]
+        public string? strEmpresaPaga { get; set; }
 
         [JsonIgnore]
 

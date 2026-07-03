@@ -715,7 +715,8 @@ namespace CostManagement.Aplicación.Features
                 //}
                 objDataProceso.lstProdTerm = _objConfig.Value.lstProdTerm;
                 objDataProceso.lstDescTotFresco = _objConfig.Value.lstDescTotFresco;
-
+                await _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(objDataProceso.lstLiqFresco);
+                await _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(objDataProceso.lstLiqRepro);
                 // Llamada para Fresco
                 objMotorProceso.AsignarCostoProcesoFrs(objDataProceso);
                 // Llamada para Reproceso
