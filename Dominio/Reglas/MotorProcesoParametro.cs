@@ -62,6 +62,7 @@ namespace CostManagement.Dominio.Reglas
         /// </summary>
         public void AsignarCostoProcesoFrs(DataProcesoParam objDataProceso)
         {
+            ProcesoResultadoDto objMatEmpaqueFrs;
             try
             {
                 var dicTotales = new Dictionary<string, decimal>();
@@ -70,6 +71,21 @@ namespace CostManagement.Dominio.Reglas
                 decimal sumRloNetas = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcLibras);
                 decimal sumRloProCabCol = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcLibras);
                 decimal dcSumCopacking = (decimal)objDataProceso.lstLiqFresco.Where(x => x.intCodCopacking > 0 && x.strPlanta != "SONGA").Sum(x => x.dcLibras);
+                decimal dcSumMatEmpaque = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcCostoTotalMatEmp ?? 0);
+                objMatEmpaqueFrs = new ProcesoResultadoDto
+                {
+                    intCodigo = objDataProceso.lstProcesoFrs
+                .LastOrDefault(obj => obj.intCodigo > 0)?.intCodigo ?? 0,
+                    intCodDet = 0,
+                    strEstado = "AC",
+                    strDescripcion = "Material Empaque",
+                    blEditable = false,
+                    strTipoLote = "RPC",
+                    dcValor = dcSumMatEmpaque,
+                    dcLibras = sumRloNetas,
+                    dcCostUnitario = dcSumMatEmpaque != 0 ? dcSumMatEmpaque / sumRloNetas : 0,
+                };
+                objDataProceso.lstProcesoFrs.Add(objMatEmpaqueFrs);
 
                 dicTotales["Recepcion"] = sumRloNetas;
                 dicTotales["Excedente M.E."] = sumRloProCabCol;
@@ -191,6 +207,9 @@ namespace CostManagement.Dominio.Reglas
         /// </summary>
         public void AsignarCostoProcesoRpc(DataProcesoParam objDataProceso)
         {
+            ProcesoResultadoDto objMatEmpaqueRpc;
+            try
+            {
             var dicTotales = new Dictionary<string, decimal>();
             List<string> lstNotCostConge = new List<string>() { /*"BP",*/
                     "CAM","RLL","R1","CDI","R2","REC","LB04","RPY","R3","RS","DV","RVVL","BDP","VE","VR"
@@ -200,6 +219,21 @@ namespace CostManagement.Dominio.Reglas
                 .Where(x => x.strLotTipo == "RE" && _lstlbsProcPrim.Contains(x.strTipCod))
                 .Sum(obj => obj.dbLibras);
             var dclbsValAgg = (decimal)objDataProceso.lstLiqRepro.Where(x => x.strLotTipo == "VA" && String.IsNullOrEmpty(x.strRecNombre)).Sum(obj => obj.dbLibras);
+                decimal dcSumMatEmpaque = (decimal)objDataProceso.lstLiqRepro.Sum(x => x.dcCostoTotalMatEmp ?? 0);
+                objMatEmpaqueRpc = new ProcesoResultadoDto
+                {
+                    intCodigo = objDataProceso.lstProcesoRpc
+                .LastOrDefault(obj => obj.intCodigo > 0)?.intCodigo ?? 0,
+                    intCodDet = 0,
+                    strEstado = "AC",
+                    strDescripcion = "Material Empaque",
+                    blEditable = false,
+                    strTipoLote = "RPC",
+                    dcValor = dcSumMatEmpaque,
+                    dcLibras = dcCostProcPrim,
+                    dcCostUnitario = dcSumMatEmpaque != 0 ? dcSumMatEmpaque / dcCostProcPrim : 0,
+                };
+                objDataProceso.lstProcesoRpc.Add(objMatEmpaqueRpc);
 
             dicTotales["Recepcion"] = dcCostProcPrim;
             dicTotales["Excedente M.E."] = dcCostProcPrim;
@@ -213,20 +247,26 @@ namespace CostManagement.Dominio.Reglas
             }
 
             // 2. Filtros específicos de Reproceso
-            dicTotales["Cocido"] = (decimal)objDataProceso.lstLiqRepro.Where(x =>  !string.IsNullOrEmpty(x.strRecNombre) && x.strRecTipo == "COC" && x.strLotTipo == "VA").Sum(obj => obj.dbLibras);
+                dicTotales["Cocido"] = (decimal)objDataProceso.lstLiqRepro.Where(x => !string.IsNullOrEmpty(x.strRecNombre) && x.strRecTipo == "COC" && x.strLotTipo == "VA").Sum(obj => obj.dbLibras);
             dicTotales["Hidratacion"] = (decimal)objDataProceso.lstLiqRepro.Where(x => !string.IsNullOrEmpty(x.strRecNombre) && x.strRecTipo != "COC" && x.strLotTipo == "VA").Sum(obj => obj.dbLibras);
             dicTotales["Retractilado"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.blRetractilado).Sum(obj => obj.dcLibrasRetractilado);
             dicTotales["Pelado"] = (decimal)objDataProceso.lstLiqRepro.Where(obj => obj.blPelado).Sum(obj => obj.dcLibrasPelado);
             dicTotales["Decorado"] = (decimal)objDataProceso.lstLiqRepro.Where(obj => obj.blDecorado).Sum(obj => obj.dbLibras);
-            dicTotales["Descabezado"] = (decimal)objDataProceso.lstLiqRepro.Where(obj =>  obj.blEsDescabezado).Sum(obj => obj.dbLibras);
-            dicTotales["IQF"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.strCongeProduc.Trim().Equals("IQF") && !lstNotCostConge.Contains(x.strTipCod) ).Sum(obj => obj.dbLibras);
-            dicTotales["Brine"] = (decimal)objDataProceso.lstLiqRepro.Where(x =>x.strCongeProduc.Trim().Equals("BRINE") && !lstNotCostConge.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
-            dicTotales["Tunel"] = (decimal)objDataProceso.lstLiqRepro.Where(x => (x.strCongeProduc.Trim().Equals("BLOCK") || x.strCongeProduc.Trim().Equals("SEMI IQF")) && !lstNotCostConge.Contains(x.strTipCod) ).Sum(obj => obj.dbLibras);
-            dicTotales["C.Copacking"] = (decimal)objDataProceso.lstLiqRepro.Where(x =>  x.intCodCopacking != 0).Sum(obj => obj.dbLibras);
+                dicTotales["Descabezado"] = (decimal)objDataProceso.lstLiqRepro.Where(obj => obj.blEsDescabezado).Sum(obj => obj.dbLibras);
+                dicTotales["IQF"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.strCongeProduc.Trim().Equals("IQF") && !lstNotCostConge.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
+                dicTotales["Brine"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.strCongeProduc.Trim().Equals("BRINE") && !lstNotCostConge.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
+                dicTotales["Tunel"] = (decimal)objDataProceso.lstLiqRepro.Where(x => (x.strCongeProduc.Trim().Equals("BLOCK") || x.strCongeProduc.Trim().Equals("SEMI IQF")) && !lstNotCostConge.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
+                dicTotales["C.Copacking"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.intCodCopacking != 0).Sum(obj => obj.dbLibras);
             
 
             // Mapeo Final
             FinalizarAsignacion(objDataProceso.lstProcesoRpc, dicTotales);
+        }
+            catch (Exception ex)
+            {
+                _objLogger.LogError("[MotorProcesoParametro].[AsignarCostoProcesoRpc] Error {error}", ex.Message);
+                throw;
+            }
         }
 
         public void AsignarCostoProcesoTarifa(DataProcesoParam objDataProceso)
