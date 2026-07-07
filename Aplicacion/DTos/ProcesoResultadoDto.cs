@@ -109,6 +109,8 @@ namespace CostManagement.Aplicación.DTos
 
         #region Datos Reprocesos
         public List<MatPrimaReproceso> lstLiqRepro  { get; set; }
+
+        public decimal dcCostoHidraReproceso { get; set; }
         #endregion
 
         #region Datos Fresco

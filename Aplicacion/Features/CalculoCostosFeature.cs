@@ -367,21 +367,22 @@ namespace CostManagement.Aplicación.Features
                 lstItemCod = MatPrimaReproceso.ObtenerLstItemHidra(objDataProceso.lstLiqRepro);
 
                 var tareaFresco = ObtenerLiquidacionValorizada(dtFechaInicio, dtFechaFin);
-                var tareaCostPromHidra = _objMateriaPrima.CostoUltMovXItemCod(lstItemCod, dtFechaInicio, dtFechaFin);
+                //var tareaCostPromHidra = _objMateriaPrima.CostoUltMovXItemCod(lstItemCod, dtFechaInicio, dtFechaFin);
                 var tareaPrecioFrsXMovCam = _objMateriaPrima.ObtenerPrecioFrsSinTallaXMovCam(lstLiqLote);
                 var tareaOtroProc = _objMateriaPrima.ObtenerConsumoMovLiqOtroProc(lstLiqLote);
 
                 await ObtenerValProceso(dtFechaInicio, objDataProceso);
                 var TareaTarifaProceso = _objProcesoParametro.ConsultarProcesoTarifa(dtFechaCorte);
-                await Task.WhenAll(tareaCostPromHidra, tareaOtroProc, tareaPrecioFrsXMovCam, tareaFresco,
+                await Task.WhenAll(//tareaCostPromHidra,
+                    tareaOtroProc, tareaPrecioFrsXMovCam, tareaFresco,
                     _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(objDataProceso.lstLiqRepro)
                     );
-                lstCostPromHidra = await tareaCostPromHidra;
+                //lstCostPromHidra = await tareaCostPromHidra;
                 objDataProceso.lstLiqFresco = await tareaFresco;
                 objDataProceso.lstProcesoTarifa = await TareaTarifaProceso;
                 lstPrecioLiqOtrProc = await tareaOtroProc;
                 lstPrecioFrsXMovCam = await tareaPrecioFrsXMovCam;
-                _objMotorAsigPrec.AsignarCostHidra(lstCostPromHidra, objDataProceso.lstLiqRepro);
+                //_objMotorAsigPrec.AsignarCostHidra(lstCostPromHidra, objDataProceso.lstLiqRepro);
                 _objMotorProceso.AsignarCostosProcesosRepro(objDataProceso);
                 _objMotorAsigPrec.AsignarCostRecibiXFrsMovCam(lstPrecioLiqOtrProc, lstPrecioFrsXMovCam, objDataProceso);
                 var lstLiqLoteInv = objDataProceso.lstLiqRepro.Where(lbsRecProc =>
@@ -717,6 +718,13 @@ namespace CostManagement.Aplicación.Features
                 objDataProceso.lstDescTotFresco = _objConfig.Value.lstDescTotFresco;
                 await _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(objDataProceso.lstLiqFresco);
                 await _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(objDataProceso.lstLiqRepro);
+
+                List<string> lstItemCod;
+
+                lstItemCod = MatPrimaReproceso.ObtenerLstItemHidra(objDataProceso.lstLiqRepro);
+                var tareaCostPromHidra = await  _objMateriaPrima.CostoUltMovXItemCod(lstItemCod, dtFechaInicio, dtFechaFin);
+                
+                objDataProceso.dcCostoHidraReproceso= tareaCostPromHidra.Sum(obj => obj.dcConsumoTotal);
                 // Llamada para Fresco
                 objMotorProceso.AsignarCostoProcesoFrs(objDataProceso);
                 // Llamada para Reproceso
