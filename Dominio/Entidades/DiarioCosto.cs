@@ -168,14 +168,14 @@ namespace CostManagement.Aplicación.DTos
         {
             if (!lstDiarioCosto.Any()) return new ConcurrentDictionary<PromXProdTal, decimal>();
             HashSet<string> _lstTipCod =
-            new(StringComparer.OrdinalIgnoreCase) { "EX", "EV" };
+            new(StringComparer.OrdinalIgnoreCase) { "EX", "EV", "SALDO" };
             return new ConcurrentDictionary<PromXProdTal, decimal>(
                 lstDiarioCosto
-                .Where(x => x.strTipo == "E" && _lstTipCod.Contains(x.strCodTip))
+                .Where(x =>/* x.strTipo == "E" &&*/ _lstTipCod.Contains(x.strCodTip) && x.dcLibras >0)
                 .GroupBy(x => new PromXProdTal(x.strProCodcor.Trim(), (int)x.stTalCodigo))
                 .ToDictionary(
                     g => g.Key,
-                    g => g.Average(x => x.dcCostoUnit))
+                    g => g.Sum(x => x.dcCostoTot) / g.Sum(x => x.dcLibras))
                 );
         }
 
