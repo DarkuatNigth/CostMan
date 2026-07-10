@@ -463,10 +463,10 @@ namespace CostManagement.Dominio.Reglas
             if (!blAplica) return;
 
             decimal dcLibras = (decimal)objLiq.dbLibras;
-            objLiq.ProcesoCostIndirecto.dcCostoFijo = Math.Round(dcLibras * objCostUni.dcCostIndirVar, 4);
-            objLiq.ProcesoCostIndirecto.dcCostoVariable = Math.Round(dcLibras * objCostUni.dcCostIndirFij, 4);
-            objLiq.dcCostIndirFijo = objCostUni.dcCostIndirVar;
-            objLiq.dcCostIndirVaria = objCostUni.dcCostIndirFij;
+            objLiq.ProcesoCostIndirecto.dcCostoFijo = Math.Round(dcLibras * objCostUni.dcCostIndirFij, 4);
+            objLiq.ProcesoCostIndirecto.dcCostoVariable = Math.Round(dcLibras * objCostUni.dcCostIndirVar, 4);
+            objLiq.dcCostIndirFijo = objCostUni.dcCostIndirFij;
+            objLiq.dcCostIndirVaria = objCostUni.dcCostIndirVar;
         }
 
         private static void AplicarCopacking(MatPrimaReproceso liq, CostosUnitarios c)
@@ -658,8 +658,8 @@ namespace CostManagement.Dominio.Reglas
             decimal libras = (decimal)liq.dcLibras;
 
             // Nota: Mapeado exactamente como en el código original línea 194-195
-            liq.ProcesoCostIndirecto.dcCostoFijo = Math.Round(libras * c.dcCostIndirVar, 4);
-            liq.ProcesoCostIndirecto.dcCostoVariable = Math.Round(libras * c.dcCostIndirFij, 4);
+            liq.ProcesoCostIndirecto.dcCostoFijo = Math.Round(libras * c.dcCostIndirFij, 4);
+            liq.ProcesoCostIndirecto.dcCostoVariable = Math.Round(libras * c.dcCostIndirVar, 4);
 
             liq.dcCostIndVaria = c.dcCostIndirVar;
             liq.dcCostIndFij = c.dcCostIndirFij;
