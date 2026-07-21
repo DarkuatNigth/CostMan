@@ -37,7 +37,7 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<MatPrimaReproceso>> ReporteReproPlanProc(DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
         Task<ILookup<(string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<string> lstCodProd);
-        Task<ILookup<(int LiqLote, string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<int> lstLiqLote);
+        Task<ILookup<LoteRpcKeyReci, decimal>> ObtenerMatPrimSaldo(List<int> lstLiqLote);
        
         Task<List<CostoMovArtDto>> CostoUltMovXItemCod(List<string> lstItemCod, DateOnly dtFechaInicio, DateOnly dtFechaFin);
         Task<List<PrecioFrsXMov>> ObtenerPrecioFrsSinTallaXMovCam(List<long> lstLiqLotes/*, bool blUniCola = false*/);
@@ -71,5 +71,15 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<DiarioCosto>> ObtenerMovimientosAsync(DateOnly dtFechaInicio,DateOnly dtFechaFin);
 
         Task<List<InventarioVal>> ConsultarInvValBodite(DateOnly dtFechaCorte, string strTipoInv);
+
+
+        Task<List<DiarioCosto>> EgresosInvXrangoFecha(DateOnly dtFechaInicio,DateOnly dtFechaFin);
+
+        Task<List<DiarioCosto>> IngresosInvXrangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin);
+
+        Task<List<PrecioFrsXMov>> ObtenerPrecioFrsSinTallaXMovCam(DateOnly dtFechaInicio, DateOnly dtFechaFin);
+
+        Task<List<InfoTalProd>> ObtenerInfoCodTal();
+
     }
 }

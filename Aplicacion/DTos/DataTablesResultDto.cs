@@ -16,10 +16,13 @@ namespace CostManagement.Aplicación.DTos
             [JsonProperty("Table2", NullValueHandling = NullValueHandling.Ignore)]
             public List<Dictionary<string, object>>? Table2 { get; set; }
 
-            /// <summary>
-            /// Crea resultado desde DataTable
-            /// </summary>
-            public static DataTablesResultDto FromDataTable(DataTable dt, int tableIndex = 0)
+            [JsonProperty("Table3", NullValueHandling = NullValueHandling.Ignore)]
+            public List<Dictionary<string, object>>? Table3 { get; set; }
+
+        /// <summary>
+        /// Crea resultado desde DataTable
+        /// </summary>
+        public static DataTablesResultDto FromDataTable(DataTable dt, int tableIndex = 0)
             {
                 var result = new DataTablesResultDto();
                 var dataList = ConvertDataTableToList(dt);
@@ -34,6 +37,9 @@ namespace CostManagement.Aplicación.DTos
                         break;
                     case 2:
                         result.Table2 = dataList;
+                        break;
+                    case 3:
+                        result.Table3 = dataList;
                         break;
                 }
 
@@ -59,7 +65,10 @@ namespace CostManagement.Aplicación.DTos
                     case 2:
                         result.Table2 = dataList;
                         break;
-                }
+                    case 3:
+                        result.Table3 = dataList;
+                        break;
+            }
 
                 return result;
             }

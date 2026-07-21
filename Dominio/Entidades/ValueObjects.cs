@@ -11,6 +11,7 @@ namespace CostManagement.Dominio.Entidades
     public record LotePrecio(int intLote, int intProdCod, int intTallaCod, string strClase);
     public record PromXProdTal(string ProdCod, int Codtal);
     public record PromLoteXProdTal(int intLote, string strProdCod, int intTallaCod);
+    public record LoteRpcValOrKey(int intSecuencialLote, int intLoteUnificado,int intLoteOrigen, int intCodProd, int intCodTal);
     public record LoteRpcValKey(int intSecuencialLote, int intLoteUnificado, int intCodProd, int intCodTal);
     public record ContextoCostos(
             ConcurrentDictionary<PromLoteXProdTal, decimal> DictPorLoteFrs,
@@ -457,6 +458,27 @@ FROM tb_tracamAuto WITH(NOLOCK)
   LEFT OUTER JOIN tb_planta P2  WITH(NOLOCK) ON P2.pla_codigo = trc_plades
   LEFT OUTER JOIN tb_bodega B2  WITH(NOLOCK) ON B2.bod_codigo = trc_camdes
   LEFT OUTER JOIN tb_PARAM      WITH(NOLOCK) ON PAR_COD = 'UMI'
+";
+
+        public string strTallaEquivale { get; set; } = @"      
+select 
+	pro_codcor, 
+	CAST(CASE 
+	WHEN pro_clas05 = 'VA' OR dpr.dpr_descri = 'IQF' THEN b.tal_codigo 
+	when pro_clas05 = 'EN' OR pro_clas05 = 'CO' OR pro_clas05 = 'SH' then  a.tal_codigo END AS INT) 
+	as codTalla, 
+	CASE 
+	WHEN pro_clas05 = 'VA' OR dpr.dpr_descri = 'IQF' THEN b.tal_descri 
+	when pro_clas05 = 'EN' OR pro_clas05 = 'CO' OR pro_clas05 = 'SH' then a.tal_descri END 
+	as descTalla
+from tb_tallasfichatecnica
+inner join tb_produc pd on pro_codcor = tft_codprod
+inner join tb_proces ps on ps.pro_codigo = pd.pro_clas06
+inner join tb_detProces dpr on dpr.dpr_codigo = ps.pro_congel
+inner join tb_tallas  a on tft_tallamp = a.tal_codigo
+inner join tb_tallas  b on tft_codtallavta = b.tal_codigo
+where pro_codcor = '6618'
+order by tft_id
 ";
     }
 }

@@ -391,7 +391,7 @@ namespace CostManagement.Aplicación.Features
                     .Distinct()
                     .ToList();
                 var lstCodProd = objDataProceso.lstLiqRepro
-                .Select(x => x.intProdCod.ToString())
+                .Select(x => x.intCodProd.ToString())
                 .Distinct()
                 .ToList();
 
@@ -437,14 +437,14 @@ namespace CostManagement.Aplicación.Features
                 {
                     var lookupCache = lstReproVal
                         .Where(v => v.dcCostoTotXLibra != null && v.dcCostoTotXLibra > 0)
-                        .ToLookup(v => (v.intLotNumero, v.intLoteUnificado, v.intProdCod, v.intCodTal));
+                        .ToLookup(v => (v.intLotNumero, v.intLoteUnificado, v.intCodProd, v.intCodTal));
 
                     foreach (var item in lstMatPrimaRepro.Where(x =>
                         x.strAgrupacion == "2. PROCESADO" &&
                         x.dcCostoTotXLibra == null))
                     {
                         var key = (item.intLotNumero, item.intLoteUnificado,
-                                   item.intProdCod, item.intCodTal);
+                                   item.intCodProd, item.intCodTal);
 
                         var cached = lookupCache[key].FirstOrDefault();
                         if (cached != null)
@@ -476,7 +476,7 @@ namespace CostManagement.Aplicación.Features
                 lstMatPrimaReproceso = await ObtenerReporteMateriaPrimaReproValorizada(objRequest.dtFechaInicio, objRequest.dtFechaFin);
                 var gruposPorLote = lstMatPrimaReproceso
                                 .Where(p => p.strAgrupacion == "2. PROCESADO")
-                                .GroupBy(p => (p.intLotNumero, p.intLoteUnificado, p.intProdCod))
+                                .GroupBy(p => (p.intLotNumero, p.intLoteUnificado, p.intCodProd))
                                 .ToDictionary(g => g.Key, g => g.ToList());
 
                 var dicCtrlProcesados = new ConcurrentDictionary<(int, int, int), byte>();
@@ -486,7 +486,7 @@ namespace CostManagement.Aplicación.Features
                 // 5. Iterar sobre los grupos creados
                 await Parallel.ForEachAsync(gruposPorLote, parallelOptions, async (entry, ct) =>
                 {
-                    var objKeyLooku = (entry.Key.intLotNumero, entry.Key.intLoteUnificado, entry.Key.intProdCod);
+                    var objKeyLooku = (entry.Key.intLotNumero, entry.Key.intLoteUnificado, entry.Key.intCodProd);
                     List<MatPrimaReproceso> lineasFichaTecnica = entry.Value;
                     try
                     {
@@ -565,6 +565,22 @@ namespace CostManagement.Aplicación.Features
             catch (Exception objException)
             {
                 _objLogger.LogError($"[CalculoCostosFeature].[ObtenerDataFechaCorte] Ocurrio un error: {objException.Message}");
+                throw;
+            }
+        }
+
+
+        public async Task<List<InfoTalProd>> ObtenerInfoEquiValTalla()
+        {
+            List<InfoTalProd> lstData;
+            try
+            {
+                lstData = await _objMateriaPrima.ObtenerInfoCodTal();
+                return lstData;
+            }
+            catch (Exception objException)
+            {
+                _objLogger.LogError($"[CalculoCostosFeature].[ObtenerInfoEquiValTalla] Ocurrio un error: {objException.Message}");
                 throw;
             }
         }

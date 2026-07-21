@@ -110,7 +110,8 @@ namespace CostManagement.Aplicación.DTos
         public string? strEmbCodigo { get; set; }
 
 
-        [JsonIgnore]
+        [Column("codTal")]
+        //[JsonIgnore]
         public short? stTalCodigo { get; set; }
 
 
