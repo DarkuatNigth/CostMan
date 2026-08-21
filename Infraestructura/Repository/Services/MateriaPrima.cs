@@ -8,7 +8,12 @@ using CostManagement.Infraestructura.Utils;
 using CostManagementService.Aplicación.DTos;
 using CostManagementService.Dominio.Entidades;
 using CostManagementService.Infraestructura.EF_Core;
+using CostManagementService.Infraestructura.EF_Core.SONG;
+using CostManagementService.Infraestructura.Repository.Services;
+using DocumentFormat.OpenXml.Drawing;
 using DocumentFormat.OpenXml.EMMA;
+using DocumentFormat.OpenXml.Office2016.Excel;
+using DocumentFormat.OpenXml.Vml;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Internal;
@@ -267,52 +272,52 @@ namespace CostManagement.Infraestructura.Repository.Services
                     _objContextFactory,
                     async objContext =>
                     {
-                var lstConsumoOtroProceso = await objContext.TbRelode.AsNoTracking()
-                    .SelectManyBatchAsync(
-                    keySelector: rlo => rlo.RldLote,
-                    values: lstLiqLote,
-                    selector: filtered =>
-                            from rld in filtered
-                            join otr in objContext.TbLototr.AsNoTracking() on new
-                            { A = rld.RldNumero, B = rld.RldTipo } equals new
-                            { A = otr.LotNumero, B = otr.LotTipo }
-                            join lid in objContext.TbLiqvad.AsNoTracking() on new
-                            { A = rld.RldNumero, B = rld.RldCodtal } equals new
-                            { A = lid.LidNoliqu, B = (int)lid.LidCodtal }
-                            join pro in objContext.TbProduc.AsNoTracking() on lid.LidCodigo equals pro.ProCodcor
-                            join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
-                            join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
-                            join tal in objContext.TbTallas.AsNoTracking() on lid.LidCodtal equals tal.TalCodigo
-                            where otr.LotEstado != "AN"
-                            group new { rld, lid, med, emb } by new
-                            {
-                                otr.LotTipo,
-                                rld.RldLote,
-                                pro.ProClasePago,
-                                pro.ProClas01,
-                                pro.ProClas05,
-                                tal.TalDescri,
-                                pro.ProCodcor,
-                                pro.ProDesesp,
-                                rld.RldCodtal
-                            } into g
-                            select new PrecioFrsXMov
-                            (
-                                g.Key.RldLote,
-                                g.Key.LotTipo,
-                                g.Key.ProClasePago,
-                                g.Key.ProClas01,
-                                g.Key.ProClas05,
-                                g.Key.TalDescri,
-                                g.Key.ProCodcor,
-                                g.Key.ProDesesp,
-                                g.Key.RldCodtal,
-                                g.Average(x => (double)x.lid.LidPrecio),
-                                g.Sum(x => (double)x.rld.RldCantid * x.emb.EmbPeso * x.med.MedFactor)
+                        var lstConsumoOtroProceso = await objContext.TbRelode.AsNoTracking()
+                            .SelectManyBatchAsync(
+                            keySelector: rlo => rlo.RldLote,
+                            values: lstLiqLote,
+                            selector: filtered =>
+                                    from rld in filtered
+                                    join otr in objContext.TbLototr.AsNoTracking() on new
+                                    { A = rld.RldNumero, B = rld.RldTipo } equals new
+                                    { A = otr.LotNumero, B = otr.LotTipo }
+                                    join lid in objContext.TbLiqvad.AsNoTracking() on new
+                                    { A = rld.RldNumero, B = rld.RldCodtal } equals new
+                                    { A = lid.LidNoliqu, B = (int)lid.LidCodtal }
+                                    join pro in objContext.TbProduc.AsNoTracking() on lid.LidCodigo equals pro.ProCodcor
+                                    join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
+                                    join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
+                                    join tal in objContext.TbTallas.AsNoTracking() on lid.LidCodtal equals tal.TalCodigo
+                                    where otr.LotEstado != "AN"
+                                    group new { rld, lid, med, emb } by new
+                                    {
+                                        otr.LotTipo,
+                                        rld.RldLote,
+                                        pro.ProClasePago,
+                                        pro.ProClas01,
+                                        pro.ProClas05,
+                                        tal.TalDescri,
+                                        pro.ProCodcor,
+                                        pro.ProDesesp,
+                                        rld.RldCodtal
+                                    } into g
+                                    select new PrecioFrsXMov
+                                    (
+                                        g.Key.RldLote,
+                                        g.Key.LotTipo,
+                                        g.Key.ProClasePago,
+                                        g.Key.ProClas01,
+                                        g.Key.ProClas05,
+                                        g.Key.TalDescri,
+                                        g.Key.ProCodcor,
+                                        g.Key.ProDesesp,
+                                        g.Key.RldCodtal,
+                                        g.Average(x => (double)x.lid.LidPrecio),
+                                        g.Sum(x => (double)x.rld.RldCantid * x.emb.EmbPeso * x.med.MedFactor)
 
-                            )
-                    );
-                return lstConsumoOtroProceso;
+                                    )
+                            );
+                        return lstConsumoOtroProceso;
                     });
             }
             catch (Exception ObjException)
@@ -701,7 +706,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                  intLotNumero = (int)mrpc.MrLotNumero,
                                  intLoteUnificado = (int)mrpc.MrRloNumeroUnificado,
                                  intCodTal = (int)mrpc.MrTalCodigo,
-                                 intProdCod = int.Parse(mrpc.MrProCodcor),
+                                 intCodProd = int.Parse(mrpc.MrProCodcor),
                                  dbMasters = (double)mrpc.MrMasters,
                                  dbLibras = (double)mrpc.MrLibras,
                                  dcCostoTotXLibra = mrpc.MrCostoUnitario,
@@ -737,13 +742,13 @@ namespace CostManagement.Infraestructura.Repository.Services
                             var liquidacionExistente = await objContext.TbMateriaPrimaReproValorizada.FirstOrDefaultAsync(x =>
                                 x.MrLotNumero == item.intLotNumero &&
                                 x.MrRloNumeroUnificado == item.intLoteUnificado &&
-                                x.MrProCodcor == item.intProdCod.ToString() &&
+                                x.MrProCodcor == item.intCodProd.ToString() &&
                                 x.MrTalCodigo == (short)item.intCodTal &&
                                 x.MrLibras == (decimal)item.dbLibras);
 
                             decimal? dcValorReferencia = objRequest.lstMatPrim.FirstOrDefault(x =>
                                 x.intLote == item.intLotNumero &&
-                                x.strCodProd == item.intProdCod.ToString() &&
+                                x.strCodProd == item.intCodProd.ToString() &&
                                 x.strTalla == item.intCodTal.ToString())?.dcValorNuevo;
 
                             if (liquidacionExistente != null)
@@ -768,7 +773,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     MrFecha = DateOnly.FromDateTime(item.dtLotFecha),
                                     MrLotNumero = item.intLotNumero,
                                     MrRloNumeroUnificado = item.intLoteUnificado,
-                                    MrProCodcor = item.intProdCod.ToString(),
+                                    MrProCodcor = item.intCodProd.ToString(),
                                     MrTalCodigo = (short)item.intCodTal,
                                     MrBodCodigo = item.strBodCod ?? "0",
                                     MrMedCodigo = (byte)item.intMedCodigo,
@@ -1537,13 +1542,20 @@ namespace CostManagement.Infraestructura.Repository.Services
                                            into rloGroup
                                         from rlo in rloGroup.DefaultIfEmpty()
                                         join pro in objContext.TbProduc.AsNoTracking() on rld.RldProcod equals pro.ProCodcor
+                                        join pp in objContext.TbProces.AsNoTracking() on pro.ProClas06 equals pp.ProCodigo
+                                        join dpr in objContext.TbDetproces.AsNoTracking() on pp.ProCongel equals dpr.DprCodigo
+                                        join pres in objContext.TbProces.AsNoTracking() on pro.ProClas06 equals pres.ProCodigo
                                         join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
                                         join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
                                         join tal in objContext.TbTallas.AsNoTracking() on rld.RldCodtal equals tal.TalCodigo
                                         group new { rld, emb, med, rlo } by new
                                         {
                                             lot.LotTiplot,
+                                            pro.ProClas01,
                                             pro.ProClas02,
+                                            pro.ProClas03,
+                                            pro.ProClas05,
+                                            dpr.DprDescri,
                                             TipDescri = "", //lp.TipDescri,
                                             lot.LotTipo, //lp.LotTipo,
                                             lot.LotCopack,
@@ -1570,7 +1582,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                             ClaseProd = g.Key.ProClas02,
                                             PlantaProceso = "",
                                             TipoProducto = "",
-                                            CongelamientoProducto = "",
+                                            CongelamientoProducto = g.Key.DprDescri,
                                             LoteOrigen = g.Key.RldLote,
                                             RloFecha = g.Key.FechaLote,
                                             Recibido = 0.0m,
@@ -1581,7 +1593,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                                             TalDescri = g.Key.TalDescri,
                                             Libras = Math.Truncate(g.Sum(x => (double)x.rld.RldCantid * x.emb.EmbPeso * x.med.MedFactor) * 100) / 100,
                                             Agrupacion = "1. RECIBIDO",
-                                            g.Key.TalCodigo
+                                            g.Key.TalCodigo,
+                                            g.Key.ProClas03,
+                                            g.Key.ProClas05,
+                                            g.Key.ProClas01
                                         }
                                 );
 
@@ -1612,7 +1627,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                                  lstRec.LoteUnificado,
                                                   "",
                                                   "",
-                                                  "",
+                                                  lstRec.CongelamientoProducto,
                                                   lstRec.LoteOrigen,
                                                   lstRec.RloFecha,
                                                   dictMinRecibi.GetValueOrDefault(lstRec.LotNumero, 0),
@@ -1624,7 +1639,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                                                   lstRec.Libras,
                                                   lstRec.Agrupacion,
                                                   lstRec.TalCodigo,
-                                                  hashLotePiso
+                                                  hashLotePiso,
+                                                  lstRec.ProClas03,
+                                                  lstRec.ProClas05,
+                                                  lstRec.ProClas01
 
                                               )
                               ).ToList().Concat(
@@ -1771,7 +1789,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                     async objContext =>
                     {
                         DateTime dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(00, 00));
-                        DateTime dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));
+                        DateTime dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59, 59));
 
                         // ── PASO 1: ejecutar SQL raw y obtener DTOs ──
                         var lstLbsProc = await objContext.Database
@@ -1935,7 +1953,7 @@ namespace CostManagement.Infraestructura.Repository.Services
             }
         }
 
-        public async Task<ILookup<(int LiqLote, string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<int> lstLiqLote)
+        public async Task<ILookup<LoteRpcKeyReci, decimal>> ObtenerMatPrimSaldo(List<int> lstLiqLote)
         {
             try
             {
@@ -1966,7 +1984,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                                         .Select(g => new
                                                         {
                                                             g.Key.Lote,
-                                                            g.Key.Producto,
+                                                            Producto = Convert.ToInt32(g.Key.Producto),
                                                             g.Key.Talla,
                                                             CostUni = g.Average(x => x.CostUni),
                                                             TotalLibras = g.Sum(x => x.TotalLibras),
@@ -1974,8 +1992,8 @@ namespace CostManagement.Infraestructura.Repository.Services
                                                         })
                                                         .Where(x => x.TotalLibras > 0)
                             .ToLookup(
-                            key => (key.Lote, key.Producto, (short)key.Talla),
-                            val => val.CostUni///val.TotalCosto / val.TotalLibras 
+                            key => new LoteRpcKeyReci(key.Lote, key.Producto, (short)key.Talla),
+                            val => val.TotalCosto / val.TotalLibras //val.CostUni 
                         );
                         return lookupPrecios;
                     });
@@ -2172,10 +2190,6 @@ namespace CostManagement.Infraestructura.Repository.Services
                     async objContext =>
                     {
                         List<string> lstCodProducto = lstInvVal.Select(obj => obj.strProd.Trim()).Distinct().ToList();
-                        List<string> lstTalDescReempla = lstInvVal.Select(obj => obj.strNomTal.Trim().Replace('-', '/')).Distinct().ToList();
-                        List<string> lstTalDescOri = lstInvVal.Select(obj => obj.strNomTal.Trim()).Distinct().ToList();
-                        lstTalDescReempla = lstTalDescReempla.Select(obj => obj.Replace("MEDIUN", "MEDIUM")).ToList();
-                        lstTalDescOri.AddRange(lstTalDescReempla);
 
 
                         // ── CONSULTA 1: Info de producto (sin cambios) ──
@@ -2217,81 +2231,8 @@ namespace CostManagement.Infraestructura.Repository.Services
                                 }
                                 ).ToListAsync();
 
-                        // ── CONSULTA 3: Códigos de talla por descripción (FALLBACK) ──
-                        var lstCodTalla = await (from tal in objContext.TbTallas.AsNoTracking()
-                                                 where tal.TalEstado == "AC"
-                                                 select new
-                                                 {
-                                                     tal.TalCodigo,
-                                                     tal.TalTipo,
-                                                     TalDescri = tal.TalDescri.Trim().Replace('/', '-')
-                                                 }
-                                                 ).ToListAsync();
 
-                        // ════════════════════════════════════════════════════════════════
-                        // RESOLUCIÓN DE TALLAS — Estrategia en cascada desde bodite
-                        // ════════════════════════════════════════════════════════════════
-
-                        // ── PASO 1: Construir diccionarios de talla DESDE BODITE (antes de consumirlos) ──
-
-                        // Nivel 1 — Clave específica: (Prod, Lote, Bodega, Libras) → talla(s)
-                        var dicTallaPorLibras = lstBoditeXFecha
-                            .GroupBy(b => (
-                                Prod: b.BitProduc.Trim(),
-                                Lote: (int)b.BitLote,
-                                Bod: b.BitCodbod.Trim(),
-                                Libras: b.BitLibras
-                            ))
-                            .ToDictionary(
-                                g => g.Key,
-                                g => g.Select(x => (short)x.TalCodigo).Distinct().ToList()
-                            );
-
-                        // Nivel 2 — Clave media: (Prod, Lote, Bodega) → talla(s) distintas
-                        var dicTallaPorBodega = lstBoditeXFecha
-                            .GroupBy(b => (
-                                Prod: b.BitProduc.Trim(),
-                                Lote: (int)b.BitLote,
-                                Bod: b.BitCodbod.Trim()
-                            ))
-                            .ToDictionary(
-                                g => g.Key,
-                                g => g.Select(x => (short)x.TalCodigo).Distinct().ToList()
-                            );
-
-                        // Nivel 3 — Clave amplia: (Prod, Lote) → talla(s) distintas
-                        var dicTallaPorLote = lstBoditeXFecha
-                            .GroupBy(b => (
-                                Prod: b.BitProduc.Trim(),
-                                Lote: (int)b.BitLote
-                            ))
-                            .ToDictionary(
-                                g => g.Key,
-                                g => g.Select(x => (short)x.TalCodigo).Distinct().ToList()
-                            );
-
-                        // ── PASO 2: Construir diccionarios de talla por descripción (FALLBACK) ──
-
-                        // 2a. Diccionario CON TalTipo (match estricto)
-                        var dicTallaPorDescripcion = new Dictionary<(string Descri, string Tipo), short>();
-                        foreach (var t in lstCodTalla)
-                        {
-                            var key = (Descri: t.TalDescri.Trim(), Tipo: t.TalTipo.Trim());
-                            if (!dicTallaPorDescripcion.ContainsKey(key))
-                                dicTallaPorDescripcion[key] = (short)t.TalCodigo;
-                        }
-
-                        // 2b. Diccionario SIN TalTipo (match relajado — último recurso)
-                        // Para casos donde TalTipo en TbTallas no coincide con strClas01 del Excel
-                        // Ejemplo: "MEDIUM" existe con TalTipo="CC" pero el Excel tiene strClas01="SC"
-                        var dicTallaSoloDescripcion = new Dictionary<string, short>();
-                        foreach (var t in lstCodTalla)
-                        {
-                            var descri = t.TalDescri.Trim();
-                            if (!dicTallaSoloDescripcion.ContainsKey(descri))
-                                dicTallaSoloDescripcion[descri] = (short)t.TalCodigo;
-                        }
-
+       
                         // ── PASO 3: Asignar datos a cada fila del Excel ──
                         foreach (var objInvVal in lstInvVal)
                         {
@@ -2312,125 +2253,14 @@ namespace CostManagement.Infraestructura.Repository.Services
                                 objInvVal.strEmbCodigo = "";
                             }
 
-                            // === Resolución de talla — Cascada de 8 prioridades ===
-                            short tallaResuelta = 0;
-                            var prod = objInvVal.strProd.Trim();
-                            var lote = objInvVal.intLote;
-                            var bod = objInvVal.strCam.Trim();
-                            var libras = Math.Round((decimal)objInvVal.dcLibras, 2);
 
                             // ── BODITE (fuente mandatoria) ──
 
-                            // PRIORIDAD 1: Match exacto por (Prod, Lote, Bodega, Libras)
-                            if (dicTallaPorLibras.TryGetValue((prod, lote, bod, libras), out var tallasNivel1)
-                                && tallasNivel1.Count == 1)
-                            {
-                                tallaResuelta = tallasNivel1[0];
-                            }
-
-                            // PRIORIDAD 2: Talla única por (Prod, Lote, Bodega)
-                            if (tallaResuelta == 0
-                                && dicTallaPorBodega.TryGetValue((prod, lote, bod), out var tallasNivel2)
-                                && tallasNivel2.Count == 1)
-                            {
-                                tallaResuelta = tallasNivel2[0];
-                            }
-
-                            // PRIORIDAD 3: Talla única por (Prod, Lote)
-                            if (tallaResuelta == 0
-                                && dicTallaPorLote.TryGetValue((prod, lote), out var tallasNivel3)
-                                && tallasNivel3.Count == 1)
-                            {
-                                tallaResuelta = tallasNivel3[0];
-                            }
 
                             // ── TEXT MATCHING (fallback cuando bodite no resuelve) ──
 
-                            // PRIORIDAD 4: Match directo de descripción + TalTipo
-                            if (tallaResuelta == 0)
-                            {
-                                var nomTalExcel = objInvVal.strNomTal.Trim();
-                                var keyDirecta = (Descri: nomTalExcel, Tipo: objInvVal.strClas01.Trim());
-                                if (dicTallaPorDescripcion.TryGetValue(keyDirecta, out var tallaDirecta))
-                                {
-                                    tallaResuelta = tallaDirecta;
-                                }
-                            }
+                            
 
-                            // PRIORIDAD 5: Normalización avanzada + TalTipo
-                            // "5-09"→"5-9", "MEDIUN"→"MEDIUM"
-                            if (tallaResuelta == 0)
-                            {
-                                var nomTalNormalizado = InvValDataDto.NormalizarTalla(objInvVal.strNomTal.Trim());
-                                var keyNorm = (Descri: nomTalNormalizado, Tipo: objInvVal.strClas01.Trim());
-                                if (dicTallaPorDescripcion.TryGetValue(keyNorm, out var tallaNorm))
-                                {
-                                    tallaResuelta = tallaNorm;
-                                }
-                            }
-
-                            // PRIORIDAD 6: Cruce inverso bodite + descripción
-                            // Cuando bodite tiene múltiples tallas, matchear descripción contra las disponibles
-                            if (tallaResuelta == 0
-                                && dicTallaPorBodega.TryGetValue((prod, lote, bod), out var tallasDisponibles)
-                                && tallasDisponibles.Count > 1)
-                            {
-                                var nomTalNorm = InvValDataDto.NormalizarTalla(objInvVal.strNomTal.Trim());
-                                foreach (var codTalla in tallasDisponibles)
-                                {
-                                    var tallaInfo = lstCodTalla.FirstOrDefault(t =>
-                                        (short)t.TalCodigo == codTalla
-                                        && t.TalTipo.Trim() == objInvVal.strClas01.Trim());
-
-                                    if (tallaInfo != null && tallaInfo.TalDescri.Trim() == nomTalNorm)
-                                    {
-                                        tallaResuelta = codTalla;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // PRIORIDAD 7: Match relajado — SIN restricción de TalTipo
-                            // Para cuando TbTallas tiene la talla pero con TalTipo distinto al strClas01 del Excel
-                            // Ejemplo: "MEDIUM" existe con TalTipo="CC" pero Excel tiene strClas01="SC"
-                            if (tallaResuelta == 0)
-                            {
-                                var nomTalNorm = InvValDataDto.NormalizarTalla(objInvVal.strNomTal.Trim());
-
-                                // Intentar primero con descripción normalizada
-                                if (dicTallaSoloDescripcion.TryGetValue(nomTalNorm, out var tallaRelajada))
-                                {
-                                    tallaResuelta = tallaRelajada;
-                                }
-                                // Intentar con descripción original (sin normalizar)
-                                else if (dicTallaSoloDescripcion.TryGetValue(objInvVal.strNomTal.Trim(), out var tallaOri))
-                                {
-                                    tallaResuelta = tallaOri;
-                                }
-                            }
-
-                            // PRIORIDAD 8: Cruce inverso bodite SIN restricción de TalTipo
-                            // Último intento: bodite con múltiples tallas, matchear solo por descripción
-                            if (tallaResuelta == 0
-                                && dicTallaPorBodega.TryGetValue((prod, lote, bod), out var tallasUltimoIntento)
-                                && tallasUltimoIntento.Count > 1)
-                            {
-                                var nomTalNorm = InvValDataDto.NormalizarTalla(objInvVal.strNomTal.Trim());
-                                foreach (var codTalla in tallasUltimoIntento)
-                                {
-                                    // Sin filtro de TalTipo
-                                    var tallaInfo = lstCodTalla.FirstOrDefault(t =>
-                                        (short)t.TalCodigo == codTalla);
-
-                                    if (tallaInfo != null && tallaInfo.TalDescri.Trim() == nomTalNorm)
-                                    {
-                                        tallaResuelta = codTalla;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            objInvVal.stTalCodigo = tallaResuelta;
                         }
                         //var obj = lstInvVal.Where(x => x.stTalCodigo == 0).ToList();
                         //_objLogger.LogWarning(
@@ -2462,7 +2292,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                 MpsFecha = objInvVal.dtFecha,
                                 MpsBodCodigo = objInvVal.strCam,
                                 MpsRloNumero = objInvVal.intLote,
-                                MpsTalCodigo = (short)objInvVal.stTalCodigo,
+                                MpsTalCodigo = (short)objInvVal.intTalCodigo,
                                 MpsMedCodigo = (byte)objInvVal.btMedCodigo,
                                 MpsEmbCodigo = objInvVal.strEmbCodigo,
                                 MpsProCodcor = objInvVal.strProd,
@@ -2498,6 +2328,8 @@ namespace CostManagement.Infraestructura.Repository.Services
         {
             try
             {
+                var obj = _objCostosFactory.CreateDbContext();
+                obj.TbMateriaPrimaSaldo.ExecuteDeleteAsync();
                 await ManejoContext<CostosDbContext>.EjecutarAsync(
                     _objCostosFactory,
                     async objContext =>
@@ -2537,26 +2369,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                             }
                         }
                         List<TbMateriaPrimaSaldo> lstMatPrimaFechaCorte = lstInvVal
-                            .Select(objInvVal => new TbMateriaPrimaSaldo
-                            {
-                                MpsEmpCodigo = (short)1,
-                                MpsTipo = "I",
-                                MpsTipoLote = objInvVal.strTipoLote,
-                                MpsFecha = objInvVal.dtFecha,
-                                MpsFechaCorte = objRequest.dtFechaCorte,
-                                MpsBodCodigo = objInvVal.strCam,
-                                MpsRloNumero = objInvVal.intLote,
-                                MpsTalCodigo = (short)objInvVal.stTalCodigo,
-                                MpsMedCodigo = (byte)objInvVal.btMedCodigo,
-                                MpsEmbCodigo = objInvVal.strEmbCodigo,
-                                MpsProCodcor = objInvVal.strProd,
-                                MpsMasters = (decimal)objInvVal.dcMaster,
-                                MpsLibras = (decimal)objInvVal.dcLibras,
-                                MpsCostoUnitario = (decimal)objInvVal.dcCosto,
-                                MpsCostoTotal = (decimal)objInvVal.dcTotal,
-                                MpsEstado = "AC",
-                                MpsUsuarioCrea = "ADMINISTRA"
-                            }).ToList();
+                            .Select(objInvVal => new TbMateriaPrimaSaldo(objInvVal, objRequest.dtFechaCorte)).ToList();
                         // 2. Inserción Eficiente
                         //var lstValoresVacios = lstMatPrimaFechaCorte.Where(obj => obj.MpsTalCodigo == 0).ToList();
                         if (lstMatPrimaFechaCorte.Any())
@@ -2623,25 +2436,9 @@ namespace CostManagement.Infraestructura.Repository.Services
                             _objContextFactory,
                             async objContext =>
                             {
-                                var lstInfoProdCod = await objContext.TbProduc.AsNoTracking()
-                                    .SelectManyBatchAsync(
-                                        keySelector: pro => pro.ProCodcor,
-                                        values: lstProdCod,
-                                        selector: filtered =>
-                                            from pro in filtered
-                                            join pres in objContext.TbProces.AsNoTracking()
-                                                on pro.ProClas06 equals pres.ProCodigo
-                                            select new
-                                            {
-                                                ProCodcor = pro.ProCodcor.Trim(),
-                                                pro.ProDesesp,
-                                                pro.ProClas01,
-                                                pro.ProClas02,
-                                                pro.ProClas05,
-                                                pro.ProCodigo,
-                                                pres.ProDescri
-                                            }
-                                    );
+
+                                var lstInfoProdCod = await ObtenerInfoProd(lstProdCod);
+
                                 var lstInfoCodTal = await objContext.TbTallas.AsNoTracking()
                                     .SelectManyBatchAsync(
                                         keySelector: tal => tal.TalCodigo,
@@ -2650,23 +2447,20 @@ namespace CostManagement.Infraestructura.Repository.Services
                                             from tal in filtered
                                             select new { tal.TalCodigo, tal.TalDescri }
                                     );
+                                var dicProduc = lstInfoProdCod
+                                        .GroupBy(obj => obj.strProCodcor)
+                                        .ToDictionary(g => g.Key, g => g.First());
+
+                                var dicTallas = lstInfoCodTal
+                                    .GroupBy(obj => obj.TalCodigo)
+                                    .ToDictionary(g => g.Key, g => g.First().TalDescri);
                                 foreach (var sal in lstResultado)
                                 {
-                                    var objProduc = lstInfoProdCod.FirstOrDefault(obj => obj.ProCodcor == sal.strProCodcor);
-                                    var objTalla = lstInfoCodTal.FirstOrDefault(obj => obj.TalCodigo == (decimal)sal.stTalCodigo);
-                                    if (objProduc != null)
+                                    if (dicProduc.TryGetValue(sal.strProCodcor, out var objProduc))
                                     {
-                                        CtCtblXClaseTipo objKey = new CtCtblXClaseTipo(objProduc.ProClas05, objProduc.ProClas02);
-                                        sal.strProDesesp = objProduc.ProDesesp;
-                                        sal.strProClas01 = objProduc.ProClas01;
-                                        sal.strProClas05 = objProduc.ProClas05;
-                                        sal.strProdDescri = objProduc.ProDescri;
-                                        sal.strProCod = objProduc.ProCodigo;
-                                        sal.lgCuentaContable = InventarioVal._mapaDeCuentas.GetValueOrDefault(objKey, 000000);
-                                        sal.objLotePromProdTalKey = new PromXProdTal(sal.strProCodcor.Trim(), (int)sal.stTalCodigo);
+                                        dicTallas.TryGetValue((decimal)sal.stTalCodigo, out var strTalDescri);
+                                        sal.InicializarCampos(objProduc, strTalDescri ?? "");
                                     }
-                                    if (objTalla != null)
-                                        sal.strTalDescri = objTalla.TalDescri;
                                 }
                             });
                     }
@@ -2829,24 +2623,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         _objContextFactory,
                         async ctx =>
                         {
-                            var lstInfoProdCod = await ctx.TbProduc.AsNoTracking()
-                                .SelectManyBatchAsync(
-                                    keySelector: pro => pro.ProCodcor,
-                                    values: lstProdCod,
-                                    selector: filtered =>
-                                        from pro in filtered
-                                        join pres in ctx.TbProces.AsNoTracking() on pro.ProClas06 equals pres.ProCodigo
-                                        select new
-                                        {
-                                            ProCodcor = pro.ProCodcor.Trim(),
-                                            pro.ProDesesp,
-                                            pro.ProClas01,
-                                            pro.ProClas02,
-                                            pro.ProClas05,
-                                            pres.ProCodigo,
-                                            pres.ProDescri
-                                        }
-                                );
+                            var lstInfoProdCod = await ObtenerInfoProd(lstProdCod);
                             var lstInfoCodTal = await ctx.TbTallas.AsNoTracking()
                                 .SelectManyBatchAsync(
                                     keySelector: tal => tal.TalCodigo,
@@ -2859,23 +2636,20 @@ namespace CostManagement.Infraestructura.Repository.Services
                                             tal.TalDescri
                                         }
                                 );
+                            var dicProduc = lstInfoProdCod
+                                    .GroupBy(obj => obj.strProCodcor)
+                                    .ToDictionary(g => g.Key, g => g.First());
+
+                            var dicTallas = lstInfoCodTal
+                                .GroupBy(obj => obj.TalCodigo)
+                                .ToDictionary(g => g.Key, g => g.First().TalDescri);
                             foreach (var sal in lstSaldoInicial)
                             {
-                                var objProduc = lstInfoProdCod.FirstOrDefault(obj => obj.ProCodcor == sal.strProCodcor);
-                                var objTalla = lstInfoCodTal.FirstOrDefault(obj => obj.TalCodigo == (decimal)sal.stTalCodigo);
-                                if (objProduc != null)
+                               if (dicProduc.TryGetValue(sal.strProCodcor, out var objProduc))
                                 {
-                                    CtCtblXClaseTipo objKey = new CtCtblXClaseTipo(objProduc.ProClas05, objProduc.ProClas02);
-                                    sal.strProDesesp = objProduc.ProDesesp;
-                                    sal.strProClas01 = objProduc.ProClas01;
-                                    sal.strProClas05 = objProduc.ProClas05;
-                                    sal.strProdDescri = objProduc.ProDescri;
-                                    sal.strProCod = objProduc.ProCodigo;
-                                    sal.lgCuentaContable = InventarioVal._mapaDeCuentas.GetValueOrDefault(objKey, 000000);
-                                    sal.objLotePromProdTalKey = new PromXProdTal(sal.strProCodcor.Trim(), (int)sal.stTalCodigo);
+                                    dicTallas.TryGetValue((decimal)sal.stTalCodigo, out var strTalDescri);
+                                    sal.InicializarCampos(objProduc, strTalDescri ?? "");
                                 }
-                                if (objTalla != null)
-                                    sal.strTalDescri = objTalla.TalDescri;
                             }
                         });
                 }
@@ -3570,5 +3344,411 @@ namespace CostManagement.Infraestructura.Repository.Services
         }
         #endregion
 
+        #region Consulta Movimientos Inventario
+        public async Task<List<DiarioCosto>> EgresosInvXrangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+            try
+            {
+                List<DiarioCosto> listDiario;
+                var dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(0, 0));
+                var dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));
+
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                            _objContextFactory,
+                            async objContext =>
+                               {
+                                   listDiario = await (
+                                       from trc in objContext.TbTracamAuto
+                                       join tcd in objContext.TbTracadAuto on trc.TrcNumsec equals tcd.TcdNumero
+                                       join pro in objContext.TbProduc on tcd.TcdProduc equals pro.ProCodcor
+                                       join pp in objContext.TbProces.AsNoTracking() on pro.ProClas06 equals pp.ProCodigo
+                                       join dpr in objContext.TbDetproces.AsNoTracking() on pp.ProCongel equals dpr.DprCodigo
+                                       join pres in objContext.TbProces.AsNoTracking() on pro.ProClas06 equals pres.ProCodigo
+                                       join emb in objContext.TbEmbala on pro.ProEmbala equals emb.EmbCodigo
+                                       join med in objContext.TbMedida on pro.ProUnimed equals med.MedCodigo
+                                       join tal in objContext.TbTallas
+                                            on new { A = tcd.TcdCodtal, B = pro.ProClas01 }
+                                            equals new { A = tal.TalCodigo, B = tal.TalTipo }
+                                       join trs in objContext.TbTransa
+                                           on new { Cod = trc.TrcTipo, Tipo = trc.TrcIngegr }
+                                           equals new { Cod = trs.TrsCodigo, Tipo = trs.TrsTipo }
+                                       where trc.TrcFecha >= dtFeInicio
+                                          && trc.TrcFecha <= dtFeFin
+                                          && trc.TrcEstado == "ac"
+                                          && trc.TrcIngegr == "E"
+                                          && trc.TrcTipo != "EX"
+                                       //&& !new List<string>() {"EX", "IVA", "IBR", "CNEI", "RMC",
+                                       //    "IRP", "LAB", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", /*"REPROE", "DIR",*/
+                                       //    "IAT", "CC", "D4", "DEV","IQ", "LB" }.Contains(trc.TrcTipo)
+                                       group new { tcd, emb, med, trc } by new
+                                       {
+                                           tcd.TcdLote,
+                                           trc.TrcTipo,
+                                           trc.TrcFecha,
+                                           trc.TrcCodcam,
+                                           pro.ProClas01,
+                                           pro.ProClas02,
+                                           pro.ProClas05,
+                                           pro.ProClas03,
+                                           dpr.DprDescri,
+                                           tal.TalDescri,
+                                           tal.TalCodigo,
+                                           pro.ProCodcor,
+                                           pro.ProDesesp,
+                                           pro.ProEmbala,
+                                           med.MedCodigo,
+                                           trs.TrsCodigo,
+                                           trs.TrsDescri,
+                                           trc.TrcObserv
+                                       }
+                                       into g
+                                       select new DiarioCosto
+                                       {
+                                           strTipo = "E",
+                                           strCodTip = g.Key.TrcTipo,
+                                           strDescripcion = "5.EGRESOS " + g.Key.TrcTipo,
+                                           intLote = (int)g.Key.TcdLote,
+                                           dtFechaMov = g.Key.TrcFecha,
+                                           strProClas01 = g.Key.ProClas01,
+                                           strProClas05 = g.Key.ProClas05,
+                                           strProClas02 = g.Key.ProClas02,
+                                           strProClas03 = g.Key.ProClas03,
+                                           strCongelInv = g.Key.DprDescri,
+                                           strTalDescri = g.Key.TalDescri,
+                                           stTalCodigo = (short)g.Key.TalCodigo,
+                                           strProCodcor = g.Key.ProCodcor.Trim(),
+                                           strProdDescri = g.Key.TrsDescri,
+                                           strProCod = g.Key.TrsCodigo.Trim(),
+                                           strProDesesp = g.Key.ProDesesp,
+                                           strEmbCodigo = g.Key.ProEmbala,
+                                           strCodBod = g.Key.TrcCodcam,
+                                           intMedCodigo = (int)g.Key.MedCodigo,
+                                           dcLibras = (decimal)g.Sum(x => -(double)x.tcd.TcdCantid * x.emb.EmbPeso * x.med.MedFactor),
+                                           dcMasters = (decimal)g.Sum(x => -x.tcd.TcdCantid),
+                                           strDescri = g.Key.TrcObserv.Trim()
+                                       }).ToListAsync();
+                                   listDiario.ForEach(x => x.InitializeKeys());
+                                   return listDiario;
+                               }
+
+
+                );
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(QryEgresosAsync), ex);
+                throw;
+            }
+        }
+
+        public async Task<List<DiarioCosto>> IngresosInvXrangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+            List<DiarioCosto> lstMovIngresos;
+            try
+            {
+                var dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(0, 0));
+                var dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));
+                // Forzar command timeout para el procesamiento del ETL en tiempo real
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                            _objContextFactory,
+                            async objContext =>
+                            {
+                                lstMovIngresos = await (from trc in objContext.TbTracamAuto
+                                                        join tcd in objContext.TbTracadAuto on trc.TrcNumsec equals tcd.TcdNumero
+                                                        join pro in objContext.TbProduc on tcd.TcdProduc equals pro.ProCodcor
+                                                        join pp in objContext.TbProces.AsNoTracking() on pro.ProClas06 equals pp.ProCodigo
+                                                        join dpr in objContext.TbDetproces.AsNoTracking() on pp.ProCongel equals dpr.DprCodigo
+                                                        join emb in objContext.TbEmbala on pro.ProEmbala equals emb.EmbCodigo
+                                                        join med in objContext.TbMedida on pro.ProUnimed equals med.MedCodigo
+                                                        join tal in objContext.TbTallas
+                                                             on new { A = tcd.TcdCodtal, B = pro.ProClas01 }
+                                                             equals new { A = tal.TalCodigo, B = tal.TalTipo }
+                                                        join trs in objContext.TbTransa
+                                                            on new { Cod = trc.TrcTipo, Tipo = trc.TrcIngegr }
+                                                            equals new { Cod = trs.TrsCodigo, Tipo = trs.TrsTipo }
+                                                        where trc.TrcFecha >= dtFeInicio
+                                                           && trc.TrcFecha <= dtFeFin
+                                                           && trc.TrcEstado == "ac"
+                                                           && trc.TrcIngegr == "I"
+                                                           && !new List<string>() { "IVA", "IBR"/*, "CNEI", "REPING", "IRP", "IAT", "ILB" */}.Contains(trc.TrcTipo)
+                                                        group new { tcd, emb, med } by new
+                                                        {
+                                                            tcd.TcdLote,
+                                                            trc.TrcTipo,
+                                                            trc.TrcCodcam,
+                                                            trc.TrcFecha,
+                                                            pro.ProClas01,
+                                                            pro.ProClas05,
+                                                            pro.ProClas02,
+                                                            pro.ProClas03,
+                                                            dpr.DprDescri,
+                                                            tal.TalDescri,
+                                                            tal.TalCodigo,
+                                                            pro.ProCodcor,
+                                                            pro.ProDesesp,
+                                                            pro.ProEmbala,
+                                                            med.MedCodigo,
+                                                            trs.TrsCodigo,
+                                                            trs.TrsDescri,
+                                                            trc.TrcObserv
+                                                        }
+                                                        into g
+                                                        select new DiarioCosto
+                                                        {
+                                                            strTipo = "I",
+                                                            strCodTip = g.Key.TrcTipo,
+                                                            strDescripcion = "4.INGRESOS",
+                                                            intLote = (int)g.Key.TcdLote,
+                                                            dtFechaMov = g.Key.TrcFecha,
+                                                            strProClas01 = g.Key.ProClas01,
+                                                            strProClas05 = g.Key.ProClas05,
+                                                            strProClas02 = g.Key.ProClas02,
+                                                            strProClas03 = g.Key.ProClas03,
+                                                            strCongelInv = g.Key.DprDescri,
+                                                            strTalDescri = g.Key.TalDescri,
+                                                            stTalCodigo = (short)g.Key.TalCodigo,
+                                                            strProCodcor = g.Key.ProCodcor.Trim(),
+                                                            strProDesesp = g.Key.ProDesesp,
+                                                            strEmbCodigo = g.Key.ProEmbala,
+                                                            strCodBod = g.Key.TrcCodcam,
+                                                            strProdDescri = g.Key.TrsDescri,
+                                                            strProCod = g.Key.TrsCodigo.Trim(),
+                                                            intMedCodigo = (int)g.Key.MedCodigo,
+                                                            dcLibras = (decimal)g.Sum(x => (double)x.tcd.TcdCantid * x.emb.EmbPeso * x.med.MedFactor),
+                                                            dcMasters = (decimal)g.Sum(x => x.tcd.TcdCantid),
+                                                            strDescri = g.Key.TrcObserv.Trim()
+                                                        }).ToListAsync();
+                                lstMovIngresos.ForEach(x => x.InitializeKeys());
+
+                                return lstMovIngresos;
+                            }
+                );
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(QryIngresosAsync), ex);
+                throw;
+            }
+        }
+
+        public async Task<List<CostVentUni>> ConsultarLotePiso(List<decimal> lstLotNumero)
+        {
+
+            List<CostVentUni> lstLbsProcesadas;
+            try
+            {
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                            _objContextFactory,
+                            async objContext =>
+                            {
+                                lstLbsProcesadas = await objContext.TbLototr.AsNoTracking()
+                                .SelectManyBatchAsync(
+                                    keySelector: lot => lot.LotNumero,
+                                    values: lstLotNumero,
+                                    selector: filtLot =>
+                                        from lot in filtLot
+                                        join rld in objContext.TbRelode.AsNoTracking()
+                                           on new { A = lot.LotNumero, B = lot.LotTipo }
+                                           equals new { A = rld.RldNumero, B = rld.RldTipo }
+                                        join rlo in objContext.TbReglot.AsNoTracking()
+                                           on rld.RldLote equals rlo.RloNumero
+                                           into rloGroup
+                                        from rlo in rloGroup.DefaultIfEmpty()
+                                        join tp in objContext.TbTiplot.AsNoTracking() on lot.LotTiplot equals tp.TipCodigo
+                                        join pro in objContext.TbProduc.AsNoTracking() on rld.RldProcod equals pro.ProCodcor
+                                        join pp in objContext.TbProces.AsNoTracking() on pro.ProClas06 equals pp.ProCodigo
+                                        join dpr in objContext.TbDetproces.AsNoTracking() on pp.ProCongel equals dpr.DprCodigo
+                                        join pres in objContext.TbProces.AsNoTracking() on pro.ProClas06 equals pres.ProCodigo
+                                        join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
+                                        join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
+                                        join tal in objContext.TbTallas.AsNoTracking() on rld.RldCodtal equals tal.TalCodigo
+                                        where pro.ProClas03 == "PP"
+                                        //new HashSet<decimal> { 128,131 }.Contains(tal.TalCodigo)
+                                        group new { rld, emb, med, rlo } by new
+                                        {
+                                            lot.LotTiplot,
+                                            tp.TipDescri,
+                                            pro.ProClas01,
+                                            pro.ProClas02,
+                                            pro.ProClas03,
+                                            pro.ProClas05,
+                                            dpr.DprDescri,
+                                            lot.LotTipo, //lp.LotTipo,
+                                            lot.LotCopack,
+                                            lot.LotNumero,
+                                            LoteUnificado = lot.LotRloNumero, //lp.LoteUnificado,
+                                            lot.LotProces, //lp.LotProces,
+                                            lot.LotFecha, //lp.LotFecha,
+                                            rld.RldLote,
+                                            FechaLote = rlo.RloFecha.Value.Date,
+                                            rld.RldProcod,
+                                            pro.ProDesesp,
+                                            TalCodigo = rld.RldCodtal,
+                                            tal.TalDescri
+                                        } into g
+                                        select new CostVentUni("LOTE PISO", "I", (int?)g.Key.LotNumero, (int)g.Key.RldLote,
+                                            g.Key.RldProcod, g.Key.ProDesesp, g.Key.TalDescri, g.Key.TalCodigo, g.Key.ProClas03,
+                                            "",
+                                       g.Key.ProClas01 == "CC" && g.Key.ProClas05 == "EN" ? "ENTERO" :
+                                        g.Key.ProClas01 == "SC" && g.Key.ProClas05 == "SH" ? "COLA" :
+                                        g.Key.ProClas01 == "CC" && g.Key.ProClas05 == "VA" ? "ENTERO VALOR AGREGADO" :
+                                        g.Key.ProClas01 == "SC" && g.Key.ProClas05 == "VA" ? "COLA VALOR AGREGADO" : "",
+                                                g.Key.DprDescri, g.Key.ProClas02,
+                                                (decimal)Math.Truncate(g.Sum(x => (double)x.rld.RldCantid * x.emb.EmbPeso * x.med.MedFactor) * 100) / 100
+                                        )
+                                );
+
+                                return lstLbsProcesadas;
+                            }
+                );
+            }
+            catch (Exception objException)
+            {
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(ReporteReproPlanProc), objException);
+                throw;
+            }
+        }
+
+
+        public async Task<List<PrecioFrsXMov>> ObtenerPrecioFrsSinTallaXMovCam(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+            List<int> lstCodProdFrsSinTalla = new List<int>() { 320, 321 };
+            //List<string> lstTipoTransacNotIn = new List<string>() { "EX","TB","01", "CAL","EXA","DES","DSR","LB","TM","CNE","CNEI","CC","ECP","EMU","EOB","EPR","MBSI","SEL","EXP","VAG","LB","NA","PD","DB","ETM","DD"};
+            try
+            {
+                var dtFeInicio = dtFechaInicio.ToDateTime(new TimeOnly(0, 0));
+                var dtFeFin = dtFechaFin.ToDateTime(new TimeOnly(23, 59));
+                return await ManejoContext<CostManagementDbContext>.EjecutarEnTransaccionAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+                        List<PrecioFrsXMov> lstPrecioFrsMovCam = await
+                                (from tcd in objContext.TbTracadAuto.AsNoTracking()
+                                 join trc in objContext.TbTracamAuto.AsNoTracking() on tcd.TcdNumero equals trc.TrcNumsec
+                                 join lid in objContext.TbLiqvad.AsNoTracking() on new
+                                 { A = tcd.TcdLote, B = tcd.TcdCodtal } equals new
+                                 { A = (long)lid.LidNoliqu, B = lid.LidCodtal }
+                                 join pro in objContext.TbProduc.AsNoTracking() on lid.LidCodigo equals pro.ProCodcor
+                                 join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
+                                 join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
+                                 join tal in objContext.TbTallas.AsNoTracking() on lid.LidCodtal equals tal.TalCodigo
+                                 join trs in objContext.TbTransa.AsNoTracking() on new
+                                 { A = trc.TrcTipo, B = trc.TrcIngegr } equals new
+                                 { A = trs.TrsCodigo, B = trs.TrsTipo }
+                                 where trc.TrcFecha >= dtFeInicio
+                                       && trc.TrcFecha <= dtFeFin
+                                       && trc.TrcEstado == "AC" 
+                                       && trc.TrcIngegr == "E"
+                                       && new HashSet<string> { "UNI", "DIR", "SMT" }.Contains(trc.TrcTipo)
+                                    group new { lid, tcd, med, emb } by new
+                                    {
+                                        tcd.TcdLote,
+                                        trc.TrcTipo,
+                                        pro.ProClasePago,
+                                        pro.ProClas01,
+                                        pro.ProClas05,
+                                        tal.TalDescri,
+                                        pro.ProCodcor,
+                                        pro.ProDesesp,
+                                        tcd.TcdCodtal,
+                                    } into g
+                                    select new PrecioFrsXMov(
+                                        g.Key.TcdLote,
+                                        g.Key.TrcTipo,
+                                        g.Key.ProClasePago,
+                                        g.Key.ProClas01,
+                                        g.Key.ProClas05,
+                                        g.Key.TalDescri,
+                                        g.Key.ProCodcor,
+                                        g.Key.ProDesesp,
+                                        g.Key.TcdCodtal,
+                                        g.Average(x => (double)x.lid.LidPrecio),
+                                        g.Sum(x => (double)x.tcd.TcdCantid * x.emb.EmbPeso * x.med.MedFactor)
+                                    ) 
+                                    ).ToListAsync();
+
+                        return /*blUniCola ? lstPrecioFrsMovCam.Where(obj => obj.strTrcTipo == "UNI").ToList() :*/ lstPrecioFrsMovCam;
+                    },
+                    nivelAislamiento: IsolationLevel.ReadUncommitted,
+                    blRequiereCommit: false);
+            }
+            catch (Exception objException)
+            {
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(ObtenerPrecioFrsSinTallaXMovCam), objException);
+                throw;
+            }
+        }
+
+        public async Task<List<InfoTalProd>> ObtenerInfoCodTal()
+        {
+            try
+            {
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+
+                        return await objContext.Database
+                            .SqlQueryRaw<InfoTalProd>(
+                                new ValueObjects().strTallaEquivale
+                            )
+                            .AsNoTracking()
+                            .ToListAsync();
+                    });
+            }
+            catch (Exception objException)
+            {
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(ObtenerInfoCodTal), objException);
+                throw;
+            }
+        }
+
+        public async Task<List<InfoProd>> ObtenerInfoProd(List<string> lstProdCod)
+        {
+            try
+            {
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+
+                        return await objContext.TbProduc.AsNoTracking()
+                            .SelectManyBatchAsync(
+                                keySelector: pro => pro.ProCodcor,
+                                values: lstProdCod,
+                                selector: filtered =>
+                                    from pro in filtered
+                                    join pres in objContext.TbProces.AsNoTracking()
+                                        on pro.ProClas06 equals pres.ProCodigo
+                                    join detProc in objContext.TbDetproces.AsNoTracking()
+                                         on new
+                                         { A = (decimal)pres.ProCongel, B = (decimal)1 } equals new
+                                         { A = detProc.DprCodigo, B = detProc.DprGruDetProces }
+                                    into detProcGroup
+                                    from detProc in detProcGroup.DefaultIfEmpty()
+                                    select new InfoProd
+                                    {
+                                        strProCodcor = pro.ProCodcor.Trim(),
+                                        strProDesesp = pro.ProDesesp,
+                                        strProClas01 = pro.ProClas01,
+                                        strProClas02 = pro.ProClas02,
+                                        strProClas03 = pro.ProClas03,
+                                        strProClas05 = pro.ProClas05,
+                                        strProCodigo = pro.ProCodigo,
+                                        strProDescri = pres.ProDescri,
+                                        strDprDescri = detProc.DprDescri
+                                    }
+                            );
+                    });
+            }
+            catch (Exception objException)
+            {
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(ObtenerInfoCodTal), objException);
+                throw;
+            }
+        }
+
+
+        #endregion
     }
 }

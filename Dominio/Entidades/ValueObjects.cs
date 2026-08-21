@@ -1,5 +1,7 @@
 ﻿using CostManagement.Infraestructura.EF_Core;
+using Newtonsoft.Json;
 using System.Collections.Concurrent;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CostManagement.Dominio.Entidades
 {
@@ -11,6 +13,7 @@ namespace CostManagement.Dominio.Entidades
     public record LotePrecio(int intLote, int intProdCod, int intTallaCod, string strClase);
     public record PromXProdTal(string ProdCod, int Codtal);
     public record PromLoteXProdTal(int intLote, string strProdCod, int intTallaCod);
+    public record LoteRpcValOrKey(int intSecuencialLote, int intLoteUnificado,int intLoteOrigen, int intCodProd, int intCodTal);
     public record LoteRpcValKey(int intSecuencialLote, int intLoteUnificado, int intCodProd, int intCodTal);
     public record ContextoCostos(
             ConcurrentDictionary<PromLoteXProdTal, decimal> DictPorLoteFrs,
@@ -22,30 +25,70 @@ namespace CostManagement.Dominio.Entidades
         );
     public record CtCtblXClaseTipo(string strClase, string strTipo);
     public record NumDocXFactRef(int intNumDoc, string strFactRef);
-    internal sealed class CostosUnitarios
+    public sealed class CostosUnitarios
     {
         // Proceso Primario
+        [Column("Recepcion")]
         public decimal dcRecepcion { get; init; }
+
+        [Column("Clasificacion")]
         public decimal dcClasificacion { get; init; }
+
+        [Column("Cajas")]
         public decimal dcCajas { get; init; }
+
+        [Column("Descabezado")]
         public decimal dcDescabezado { get; init; }
         // Proceso Presentación
+
+        [Column("Decorado")]
         public decimal dcDecorado { get; init; }
+
+        [Column("Retractilado")]
         public decimal dcRetractilado { get; init; }
         // Proceso Congelación
+
+        [Column("Brine")]
         public decimal dcBrine { get; init; }
+
+        [Column("IQF")]
         public decimal dcIQF { get; init; }
+
+        [Column("Tunel")]
         public decimal dcTunel { get; init; }
         // Proceso Secundario
+
+        [Column("Pelado")]
         public decimal dcPelado { get; init; }
+
+        [Column("Hidratacion")]
         public decimal dcHidratacion { get; init; }
+
+        [Column("Cocido")]
         public decimal dcCocido { get; init; }
         // Costos estructurales
+
+        [Column("DirecVariables")]
+        [JsonProperty("C.D.Variables")]
         public decimal dcCostDirectoVar { get; init; }
+
+        [Column("DirecFijos")]
+        [JsonProperty("C.D.Fijos")]
         public decimal dcCostDirectoFij { get; init; }
+
+        [Column("IndirVariables")]
+        [JsonProperty("C.I.Variables")]
         public decimal dcCostIndirVar { get; init; }
+
+        [Column("IndirFijos")]
+        [JsonProperty("C.I.Fijos")]
         public decimal dcCostIndirFij { get; init; }
+
+        [Column("Copacking")]
+        [JsonProperty("C.Copacking")]
         public decimal dcCopacking { get; init; }
+
+        [Column("Excedente")]
         public decimal dcExcedente { get; init; }
         public static CostosUnitarios ExtraerCostosUnitarios(
         ConcurrentDictionary<string, decimal> d) => new()
@@ -457,6 +500,67 @@ FROM tb_tracamAuto WITH(NOLOCK)
   LEFT OUTER JOIN tb_planta P2  WITH(NOLOCK) ON P2.pla_codigo = trc_plades
   LEFT OUTER JOIN tb_bodega B2  WITH(NOLOCK) ON B2.bod_codigo = trc_camdes
   LEFT OUTER JOIN tb_PARAM      WITH(NOLOCK) ON PAR_COD = 'UMI'
+";
+
+        public string strTallaEquivale { get; set; } = @"      
+select 
+	pro_codcor, 
+	CAST(CASE 
+	WHEN pro_clas05 = 'VA' OR dpr.dpr_descri = 'IQF' THEN b.tal_codigo 
+	when pro_clas05 = 'EN' OR pro_clas05 = 'CO' OR pro_clas05 = 'SH' then  a.tal_codigo END AS INT) 
+	as codTalla, 
+	CASE 
+	WHEN pro_clas05 = 'VA' OR dpr.dpr_descri = 'IQF' THEN b.tal_descri 
+	when pro_clas05 = 'EN' OR pro_clas05 = 'CO' OR pro_clas05 = 'SH' then a.tal_descri END 
+	as descTalla,
+	cast(a.tal_codigo as int) as codTallaMP,
+	a.tal_descri as descTallaMP,
+	cast(b.tal_codigo as int) as codTallaVTA,
+	b.tal_descri as descTallaVTA
+from tb_tallasfichatecnica
+inner join tb_produc pd on pro_codcor = tft_codprod
+inner join tb_proces ps on ps.pro_codigo = pd.pro_clas06
+inner join tb_detProces dpr on dpr.dpr_codigo = ps.pro_congel
+inner join tb_tallas  a on tft_tallamp = a.tal_codigo
+inner join tb_tallas  b on tft_codtallavta = b.tal_codigo
+union ALL
+SELECT 
+    pd.pro_codcor, -- Corregido: pro_codcor en vez de prod_codcor
+    CAST(a.tal_codigo AS INT) AS codTalla, -- Corregido: Alias 'a' ajustado en el JOIN
+    a.tal_descri AS descTalla,
+     NULL AS codTallaMP,
+    CAST(NULL AS VARCHAR(100)) AS descTallaMP, -- Forzado a VARCHAR para igualar tipo
+    NULL AS codTallaVTA,
+    CAST(NULL AS VARCHAR(100)) AS descTallaVTA -- Forzado a VARCHAR para igualar tipo
+FROM tb_produc pd
+LEFT JOIN tb_tallas a ON  a.tal_tipo = pd.pro_clas01  -- Corregido: Alias 'a' y columnas pro_
+WHERE pd.pro_codcor IN ('321', '320','3343','2635', '2636','6885','3704','3219'
+,'3342','5911','5909','5907','5912','1006','3344') and a.tal_descri LIKE '%/TALLA%' 
+UNION ALL 
+SELECT 
+    pd.pro_codcor, -- Corregido: pro_codcor en vez de prod_codcor
+    CAST(a.tal_codigo AS INT) AS codTalla, -- Corregido: Alias 'a' ajustado en el JOIN
+    a.tal_descri AS descTalla,
+NULL AS codTallaMP,
+    CAST(NULL AS VARCHAR(100)) AS descTallaMP, -- Forzado a VARCHAR para igualar tipo
+    NULL AS codTallaVTA,
+    CAST(NULL AS VARCHAR(100)) AS descTallaVTA -- Forzado a VARCHAR para igualar tipo
+FROM tb_produc pd
+LEFT JOIN tb_tallas a ON  a.tal_tipo = pd.pro_clas01  -- Corregido: Alias 'a' y columnas pro_
+WHERE (pd.pro_codcor IN ('5371') and a.tal_descri LIKE '%51/60%' ) OR (pd.pro_codcor IN ('1006') and a.tal_descri LIKE '%21/25.%' ) OR
+(pd.pro_codcor IN ('6642') and a.tal_descri LIKE '%71/90%' )OR
+(pd.pro_codcor IN ('321') and (a.tal_descri LIKE '%-SMALL%' OR a.tal_descri LIKE '%ML-L%' )  )OR
+(pd.pro_codcor IN ('6985') and a.tal_descri LIKE '%16/20%' )OR
+(pd.pro_codcor IN ('3886') and a.tal_descri LIKE '%20/30%' )OR
+(pd.pro_codcor IN ('665') and a.tal_descri LIKE '%30/50%'  )OR
+(pd.pro_codcor IN ('1006') and a.tal_descri LIKE '%30/50%' )OR
+(pd.pro_codcor IN ('6645') and a.tal_descri LIKE '%51/60%' )OR
+(pd.pro_codcor IN ('6395') and a.tal_descri LIKE '%20/30%' )OR
+(pd.pro_codcor IN ('2049') and 
+(a.tal_descri LIKE '%16/20%' OR a.tal_descri LIKE '%41/50%'  OR a.tal_descri LIKE '%36/40%'  OR a.tal_descri LIKE '%31/35%' )  
+)
+
+
 ";
     }
 }

@@ -310,6 +310,11 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         public LotePrecio objLotPrec { get; set; }
 
+        //Por ahora solo usado con fresco
+        [NotMapped]
+        [JsonIgnore]
+        public LoteRpcKeyXProdTal objProdTal { get; set; }
+
         #region Constructor
         public LiquidacionResultado() { }
 
@@ -575,7 +580,7 @@ namespace CostManagement.Dominio.Entidades
                         break;
                 }
             }
-
+            this.objProdTal = new LoteRpcKeyXProdTal((int)this.intCodProd, (int)this.intLidCodTal);
             this.objLotPrec = new LotePrecio(this.intLote, (int)this.intCodProd, (int)this.intLidCodTal, this.strProClas02);
         }
 
@@ -641,6 +646,42 @@ namespace CostManagement.Dominio.Entidades
                         ).ToDictionary(x => x.Key, x => x.PrecioPromedio);
         }
 
+        public static Dictionary<LoteFrsKey, decimal> GenerarDiccionarioLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        {
+            if (lstMatPrimaFrs == null)
+                return new Dictionary<LoteFrsKey, decimal>();
+
+            return lstMatPrimaFrs
+                    .GroupBy(lct => lct.objLotkey)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => (decimal)g.First().dcCostoTotXLibra
+                        //{
+                        //    decimal totLbs = (decimal)g.Sum(x => x.dcLibras);
+                        //    decimal totDol = g.Sum(x => x.dcTotalDolSum);
+                        //    return totLbs > 0 ? Math.Round(totDol / totLbs, 4) : 0m;
+                        //}
+                    );
+        }
+
+        public static Dictionary<LoteRpcKeyXProdTal, decimal> GenerarDiccionarioPromPondLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        {
+            if (lstMatPrimaFrs == null)
+                return new Dictionary<LoteRpcKeyXProdTal, decimal>();
+
+            return lstMatPrimaFrs
+                    .GroupBy(lct => lct.objProdTal)
+                    .ToDictionary(
+                        g => g.Key,
+                        g =>
+                        {
+                            decimal totLbs = (decimal)g.Sum(x => x.dcLibras);
+                            decimal totDol = g.Sum(x => x.dcTotalDolSum);
+                            return totLbs > 0 ? Math.Round(totDol / totLbs, 4) : 0m;
+                        }
+                    );
+        }
+
         public static Dictionary<LoteFrsKey, List<LiquidacionResultado>> GenerarDiccionarioLbsRetra(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
         {
             if (lstMatPrimaFrs == null)
@@ -681,33 +722,41 @@ namespace CostManagement.Dominio.Entidades
     public class ProcesoPrimarioDto
     {
         [Column("Recepcion")]
+        [JsonProperty("Recepcion")]
         public decimal? dcRecepcion { get; set; }
 
         [Column("Clasificacion")]
+        [JsonProperty("Clasificacion")]
         public decimal? dcClasificacion { get; set; }
 
         [Column("Cajas")]
+        [JsonProperty("Cajas")]
         public decimal? dcCajas { get; set; }
     }
 
     public class ProcesoPresentacionDto
     {
         [Column("Decorado")]
+        [JsonProperty("Decorado")]
         public decimal? dcDecorado { get; set; }
 
         [Column("Retractilado")]
+        [JsonProperty("Retractilado")]
         public decimal? dcRetractilado { get; set; }
     }
 
     public class ProcesoCongelacionDto
     {
         [Column("Brine")]
+        [JsonProperty("Brine")]
         public decimal? dcBrine { get; set; }
 
         [Column("IQF")]
+        [JsonProperty("IQF")]
         public decimal? dcIQF { get; set; }
 
         [Column("Tunel")]
+        [JsonProperty("Tunel")] 
         public decimal? dcTunel { get; set; }
     }
 
@@ -715,15 +764,19 @@ namespace CostManagement.Dominio.Entidades
     {
 
         [Column("Descabezado")]
+        [JsonProperty("Descabezado")]
         public decimal? dcDescabezado { get; set; }
 
         [Column("Pelado")]
+        [JsonProperty("Pelado")]
         public decimal? dcPelado { get; set; }
 
         [Column("Hidratacion")]
+        [JsonProperty("Hidratacion")]
         public decimal? dcHidratacion { get; set; }
 
         [Column("Cocido")]
+        [JsonProperty("Cocido")]
         public decimal? dcCocido { get; set; }
     }
 
@@ -731,18 +784,22 @@ namespace CostManagement.Dominio.Entidades
     public class ProcesoCostDirectoDto
     {
         [Column("C.D.Fijos")]
+        [JsonProperty("DirecFijos")]
         public decimal? dcCostoFijo { get; set; }
 
         [Column("C.D.Variables")]
+        [JsonProperty("DirecVariables")]
         public decimal? dcCostoVariable { get; set; }
     }
 
     public class ProcesoCostIndirectoDto
     {
         [Column("C.I.Fijos")]
+        [JsonProperty("IndirFijos")]
         public decimal? dcCostoFijo { get; set; }
 
         [Column("C.I.Variables")]
+        [JsonProperty("IndirVariables")]
         public decimal? dcCostoVariable { get; set; }
     }
 

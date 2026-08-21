@@ -14,7 +14,7 @@ namespace CostManagement.Dominio.Reglas
             List<LiquidacionResultado> lstFresco,
             List<PrecioFrsXMov> lstPrecioFrsUni,
             List<PrecioFrsXMov> lstPrecioFrsDir,
-            string strVersionCtx,
+            //string strVersionCtx,
             HashSet<LoteRpcKeyXSec> objLotesPermitidos = null,
             ILookup<LoteRpcKeyXSec, MatPrimaReproceso> objIndiceXLote = null)
         {
@@ -55,7 +55,7 @@ namespace CostManagement.Dominio.Reglas
                         .Where(x => x.strAgrupacion == "1. RECIBIDO"
                                  && x.dbCostoXSecuencial > 0
                                  && x.dbLibras > 0)
-                        .GroupBy(x => new LoteRpcKeyXProdTal(x.intProdCod, x.intCodTal))
+                        .GroupBy(x => new LoteRpcKeyXProdTal(x.intCodProd, x.intCodTal))
                         .ToDictionary(
                             g => g.Key,
                             g =>
@@ -67,7 +67,7 @@ namespace CostManagement.Dominio.Reglas
 
                     foreach (var rec in lstFiltRecResid)
                     {
-                        var key = new LoteRpcKeyXProdTal(rec.intProdCod, rec.intCodTal);
+                        var key = new LoteRpcKeyXProdTal(rec.intCodProd, rec.intCodTal);
                         if (dictRef.TryGetValue(key, out decimal dcPrecio) && dcPrecio > 0)
                         {
                             _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod)));
@@ -93,6 +93,17 @@ namespace CostManagement.Dominio.Reglas
 
             var lbsTot = lstItemsLote
                 .Where(x => x.strAgrupacion == "1. RECIBIDO" && !x.blExcluidoCosteo)
+                .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod)))
+                .ToDictionary(g => g.Key, g => (decimal)g.Sum(x => x.dbLibras));
+
+            // Libras RECIBIDO sin costear que son material de laboratorio (LB04):
+            // no tienen costo de origen por naturaleza, no deben bloquear el costeo
+            // del lote si representan una porción menor (≤5%) del total del nivel.
+            var lbsFaltanteLB04 = lstItemsLote
+                .Where(x => x.strAgrupacion == "1. RECIBIDO"
+                         && x.dbCostoXSecuencial == 0
+                         && !x.blExcluidoCosteo
+                         && string.Equals(x.strTipCod?.Trim(), "LB04", StringComparison.OrdinalIgnoreCase))
                 .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod)))
                 .ToDictionary(g => g.Key, g => (decimal)g.Sum(x => x.dbLibras));
 
@@ -142,7 +153,21 @@ namespace CostManagement.Dominio.Reglas
                 var keyGuardia = new LoteRpcNivelCosteo(objItemLote.intLotNumero, intNivel);
                 decimal dcLbsTot = lbsTot.TryGetValue(keyGuardia, out var t) ? t : 0m;
                 decimal dcLbsCost = lbsCost.TryGetValue(keyGuardia, out var c) ? c : 0m;
-                if (dcLbsTot > 0 && dcLbsCost < dcLbsTot) continue; // RECIBIDO incompletos → esperar
+                if (dcLbsTot > 0 && dcLbsCost < dcLbsTot)
+                {
+                    decimal dcLbsFaltante = dcLbsTot - dcLbsCost;
+                    decimal dcLbsFaltanteLB04 = lbsFaltanteLB04.TryGetValue(keyGuardia, out var lb04) ? lb04 : 0m;
+
+                    // Excepción: se permite costear con lo disponible SOLO si
+                    // (a) algo ya está costeado, (b) toda la falta es material de
+                    // laboratorio (LB04, sin costo por naturaleza) y (c) esa falta
+                    // no supera el 5% del total del nivel.
+                    bool blSoloFaltaLB04 = dcLbsFaltante <= dcLbsFaltanteLB04;
+                    bool blDentroDeTolerancia = (dcLbsFaltante / dcLbsTot) <= 0.05m;
+
+                    if (dcLbsCost == 0m || !blSoloFaltaLB04 || !blDentroDeTolerancia)
+                        continue; // RECIBIDO incompletos → esperar
+                }
 
                 // ── Prorrateo general ──────────────────────────────────────────
                 if (blEsRecibidoCosteado && blEsLbsProceso && dcLbsTotalProc > 0)

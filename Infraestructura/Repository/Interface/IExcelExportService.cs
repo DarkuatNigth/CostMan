@@ -8,7 +8,7 @@ namespace CostManagement.Infraestructura.Repository.Interface
     {
         byte[] ExportarLiquidacionesAExcel(List<LiquidacionResultado> liquidaciones);
         List<InvValDataDto> LeerExcelInvVal(Stream archivoStream);
-        Task<DataGeneralResult> DataGeneralExcel(DataGeneralRequest dataGeneralRequest, DataTable dataTable);
+        Task<DataGeneralResult> DataGeneralExcel(DataGeneralRequest dataGeneralRequest, DataTable dataTable, CostosUnitarios objCostUni = null);
         Task<DataGeneralResult> ObtenerReporteExcel(DataGeneralRequest dataGeneralRequest);
     }
 }

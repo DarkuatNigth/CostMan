@@ -47,11 +47,12 @@ namespace CostManagement.API.Controllers
             try
             {
                 List<LiquidacionResultado> lstTotalResultados = await _objCostoMateriaPrima.ObtenerLiquidacionValorizada(dtFechaInicio, dtFechaFin);
+                CostosUnitarios objCostUni = await _objCostoMateriaPrima.ObtenerValProcesoFrs(dtFechaInicio);
                 List<bool> lstBool = new List<bool> { true };
                 var dtResult = new DataTablesResultDto
                 {
-                    Table = lstTotalResultados.AListaDeDiccionarios()//,
-                    //Table1 = lstBool.AListaDeDiccionarios()
+                    Table = lstTotalResultados.AListaDeDiccionarios(),
+                    Table3 = DataTablesResultDto.FromObject(objCostUni)
                 };
                 return Ok(new ApiResponse<DataTablesResultDto>
                 {
@@ -189,11 +190,12 @@ namespace CostManagement.API.Controllers
             try
             {
                 var lstTotalResultados = await _objCostoMateriaPrima.ObtenerReporteMateriaPrimaReproValorizada(dtFechaInicio, dtFechaFin);
+                CostosUnitarios objCostUni = await _objCostoMateriaPrima.ObtenerValProcesoRpc(dtFechaInicio);
                 List<bool> lstBool = new List<bool> { true };
                 var dtResult = new DataTablesResultDto
                 {
-                    Table = lstTotalResultados.AListaDeDiccionarios()//,
-                    //Table1 = lstBool.AListaDeDiccionarios()
+                    Table = lstTotalResultados.AListaDeDiccionarios(),
+                    Table3 = DataTablesResultDto.FromObject(objCostUni)
                 };
                 return Ok(new ApiResponse<DataTablesResultDto>
                 {
@@ -272,19 +274,21 @@ namespace CostManagement.API.Controllers
         }
 
         [HttpGet("inv-estructura")]
-        public IActionResult ObtenerEstructuraInv()
+        public async Task<IActionResult> ObtenerEstructuraInv()
         {
 
             try
             {
                 var lstTotalResultados = new List<InvValDataDto>() { new InvValDataDto()};
                 var lstOpciones = _objCostoMateriaPrima.ObtenerDataProcesoParametro();
-                var lstFechaCorte = _objCostoMateriaPrima.ObtenerDataFechaCorte().Result;
+                var lstFechaCorte = await _objCostoMateriaPrima.ObtenerDataFechaCorte();
+                var lstInfoProdTal = await _objCostoMateriaPrima.ObtenerInfoEquiValTalla();
                 var dtResult = new DataTablesResultDto
                 {
                     Table = lstTotalResultados.AListaDeDiccionarios(), 
                     Table1 = lstOpciones.AListaDeDiccionarios(), 
-                    Table2 = lstFechaCorte.AListaDeDiccionarios() 
+                    Table2 = lstFechaCorte.AListaDeDiccionarios(),
+                    Table3 = lstInfoProdTal.AListaDeDiccionarios()
                 };
                 return Ok(new ApiResponse<DataTablesResultDto>
                 {
@@ -427,6 +431,37 @@ namespace CostManagement.API.Controllers
         }
 
 
+        [HttpGet("costo-venta-uni")]
+        public async Task<IActionResult> ObtenerCostoVentaUni(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+
+            try
+            {
+
+                var lstResult =
+                    await _objOperacionComercial.ConsultarCostoVentaUni(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Consulta ejecutada correctamente",
+                    objData = dtResult
+                });
+
+            }
+            catch (Exception objException)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error al obtener la informacion: " + objException.Message,
+                    objData = ""
+                });
+            }
+        }
+
+
         [HttpPost("exportar-excel")]
         public async Task<IActionResult> ExportarLiquidacionesExcel([FromBody] DataGeneralRequest request)
         {
@@ -442,6 +477,7 @@ namespace CostManagement.API.Controllers
             List<DiarioCosto> lstDiarioCost;
             DataTable dataTable = new DataTable();
             DataGeneralResult excelBytes = null;
+            CostosUnitarios objCostUni = null;
             try
             {
 
@@ -459,6 +495,7 @@ namespace CostManagement.API.Controllers
                     case "materia-prima":
                         liquidaciones = await
                             _objCostoMateriaPrima.ObtenerLiquidacionValorizada(fechaInicio, fechaFin);
+                        objCostUni = await _objCostoMateriaPrima.ObtenerValProcesoFrs(fechaInicio);
                         dataTable = liquidaciones.ADataTable();
                         break;
 
@@ -477,6 +514,7 @@ namespace CostManagement.API.Controllers
                     case "materia-prima-repro":
                         materiaPrimaRepro = await
                             _objCostoMateriaPrima.ObtenerReporteMateriaPrimaReproValorizada(fechaInicio, fechaFin);
+                        objCostUni = await _objCostoMateriaPrima.ObtenerValProcesoRpc(fechaInicio);
                         dataTable = materiaPrimaRepro.ADataTable();
                         break;
 
@@ -497,6 +535,11 @@ namespace CostManagement.API.Controllers
                         dataTable =  obj.ADataTable();
                         break;
 
+                    case "costo-venta-uni":
+                        var objCostVen = await _objOperacionComercial.ConsultarCostoVentaUni(fechaInicio, fechaFin);
+                        dataTable = objCostVen.ADataTable();
+                        break;
+
                     default:
                         excelBytes = await  _excelService.ObtenerReporteExcel(request);
                         break;
@@ -505,7 +548,7 @@ namespace CostManagement.API.Controllers
 
                 if (excelBytes == null)
                 {
-                    excelBytes = await _excelService.DataGeneralExcel(request, dataTable);
+                    excelBytes = await _excelService.DataGeneralExcel(request, dataTable, objCostUni!);
 
                 }
                 return File(excelBytes.Data.ToArray(),

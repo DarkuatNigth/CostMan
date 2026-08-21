@@ -7,6 +7,7 @@ using CostManagement.Infraestructura.Utils;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -109,7 +110,7 @@ namespace CostManagement.Infraestructura.Repository.Services
             }
         }
 
-        public async Task<DataGeneralResult> DataGeneralExcel(DataGeneralRequest dataGeneralRequest, DataTable dataTable)
+        public async Task<DataGeneralResult> DataGeneralExcel(DataGeneralRequest dataGeneralRequest, DataTable dataTable, CostosUnitarios objCostUni = null)
         {
             DataGeneralResult result = new DataGeneralResult { Success = false };
 
@@ -155,15 +156,37 @@ namespace CostManagement.Infraestructura.Repository.Services
                         worksheet.Cell(2, 1).Style.Font.FontName = "Tahoma";
                         worksheet.Cell(2, 1).Style.Font.SetFontSize(10);
 
-                        // Encabezados en fila 4
-                        int filaInicio = 4;
-                        worksheet.SheetView.FreezeRows(4);
+                       
+                        // Fila 4: costos unitarios (ARRIBA del nombre)
+                        int filaCostosUnitarios = 4;
+                        bool hayCostosUnitarios = objCostUni != null;
+
+                        if (hayCostosUnitarios)
+                        {
+                            var mapaCostos = MapearCostosPorColumna(objCostUni, dataGeneralRequest.columnas);
+                            for (int col = 0; col < totalColumnas; col++)
+                            {
+                                string nombreCol = dataGeneralRequest.columnas[col];
+                                if (mapaCostos.TryGetValue(nombreCol, out decimal valorUnitario))
+                                {
+                                    var celda = worksheet.Cell(filaCostosUnitarios, col + 1);
+                                    celda.Value = (double)valorUnitario;
+                                    celda.Style.NumberFormat.Format = "_(\"$\"* #,##0.0000_);_(\"$\"* (#,##0.0000);_(\"$\"* \"-\"????_);_(@_)";
+                                    celda.Style.Font.SetBold();
+                                }
+                            }
+                        }
+
+                        // Fila 5: nombres (encabezado)
+                        int filaInicio = hayCostosUnitarios ? 5 : 4;
 
                         for (int col = 0; col < totalColumnas; col++)
                         {
                             worksheet.Cell(filaInicio, col + 1).Value = dataGeneralRequest.columnas[col];
                             worksheet.Cell(filaInicio, col + 1).Style.Font.SetBold();
                         }
+
+                        worksheet.SheetView.FreezeRows(filaInicio);
                         // --- LÓGICA GENÉRICA PARA SÚPER-ENCABEZADOS (FILA 3) ---
                         int filaGrupos = 3;
                         // LÓGICA ANÓNIMA PARA GRUPOS (FILA 3)
@@ -306,6 +329,39 @@ namespace CostManagement.Infraestructura.Repository.Services
                     Message = ex.Message
                 };
             }
+        }
+
+        private static Dictionary<string, decimal> MapearCostosPorColumna(CostosUnitarios costos, string[] columnasDestino)
+        {
+            var dict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            if (costos == null) return dict;
+
+            // Set de nombres válidos según lo que el Excel realmente va a pintar
+            var columnasValidas = new HashSet<string>(columnasDestino, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var prop in typeof(CostosUnitarios).GetProperties())
+            {
+                if (prop.PropertyType != typeof(decimal)) continue;
+
+                var valor = (decimal)prop.GetValue(costos);
+
+                // 1º intento: [Column]
+                var nombreColumn = prop.GetCustomAttribute<ColumnAttribute>()?.Name;
+                // 2º intento: [JsonProperty]
+                var nombreJson = prop.GetCustomAttribute<JsonPropertyAttribute>()?.PropertyName;
+
+                // Elegimos el que realmente coincida con una columna del Excel.
+                // Prioriza Column; si no matchea, prueba JsonProperty.
+                string clave = null;
+                if (nombreColumn != null && columnasValidas.Contains(nombreColumn))
+                    clave = nombreColumn;
+                else if (nombreJson != null && columnasValidas.Contains(nombreJson))
+                    clave = nombreJson;
+
+                if (clave != null)
+                    dict[clave] = valor;
+            }
+            return dict;
         }
 
         public byte[] ExportarLiquidacionesAExcel(List<LiquidacionResultado> liquidaciones)
