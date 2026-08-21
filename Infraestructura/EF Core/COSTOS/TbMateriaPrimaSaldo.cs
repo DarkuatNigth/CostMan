@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using CostManagement.Aplicación.DTos;
 using Microsoft.EntityFrameworkCore;
 
 namespace CostManagementService.Infraestructura.EF_Core;
@@ -116,4 +117,31 @@ public partial class TbMateriaPrimaSaldo
 
     [Column("mps_fecha", TypeName = "datetime")]
     public DateTime? MpsFecha { get; set; }
+
+    public TbMateriaPrimaSaldo()
+    {
+
+    }
+
+    public TbMateriaPrimaSaldo(InvValDataDto objInvVal, DateOnly dtFechaCorte)
+    {
+
+        MpsEmpCodigo = (short)1;
+        MpsTipo = "I";
+        MpsTipoLote = objInvVal.strTipoLote;
+        MpsFecha = objInvVal.dtFecha;
+        MpsFechaCorte =  dtFechaCorte;
+        MpsBodCodigo = objInvVal.strCam;
+        MpsRloNumero = objInvVal.intLote;
+        MpsTalCodigo = (short)objInvVal.intTalCodigo;
+        MpsMedCodigo = (byte)objInvVal.btMedCodigo;
+        MpsEmbCodigo = objInvVal.strEmbCodigo;
+        MpsProCodcor = objInvVal.strProd;
+        MpsMasters = (decimal)objInvVal.dcMaster;
+        MpsLibras = (decimal)objInvVal.dcLibras;
+        MpsCostoUnitario = (decimal)objInvVal.dcCosto;
+        MpsCostoTotal = (decimal)objInvVal.dcTotal;
+        MpsEstado = "AC";
+        MpsUsuarioCrea = "ADMINISTRA";
+    }
 }

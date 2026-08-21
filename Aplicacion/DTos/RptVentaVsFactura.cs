@@ -107,262 +107,62 @@ namespace CostManagementService.Aplicacion.DTos
         public NumDocXFactRef objDocFactRef { get; set; }
         #endregion
 
-        public RptVentaVsFactura(
-            string strTipo,
-            int intTranCam,
-            DateTime? Fecha,
-            string strCod,
-            string strDescProducto,
-            string strTalla,
-            int intTalla,
-            string strClte,
-            string strPais,
-            string strFact,
-            decimal dcLibras,
-            decimal dcPemPrecio,
-            decimal dcCostoVenta,
-            decimal dcPemPeso,
-            decimal dcMasters
-        )
+
+
+
+
+        public RptVentaVsFactura(RepFactPesoRealResult objPesosReales)
         {
-            #region asignación y tratamiento de datos para conversiones
-
-            this.strTipo = strTipo;
-            this.intTranCam = intTranCam;
-
-            this.dtFecha = Fecha.HasValue ? DateOnly.FromDateTime(Fecha.Value) : default;
-
-            if (int.TryParse(strCod, out int parsedCod))
-            {
-                this.intCodProd = parsedCod;
-            }
-            this.strDescProducto = strDescProducto;
-            this.strTalla = strTalla;
-            this.intTalla = intTalla; // Asignación de la variable ignorada
-            this.strClte = strClte;
-            this.strPais = strPais;
-            this.strFact = strFact.Trim();
-            this.dcLibras = dcLibras;
-            this.dcCostoVenta = dcCostoVenta;
-            
+            this.strFact = objPesosReales.strFact?.Trim();
+            this.strTipo = this.strFact.Contains("R") == true ?  "VENTA MARINA" : "VENTA EXPORTACION";
+            this.intTranCam = (int)objPesosReales.intTcdNumero;
+            this.dtFecha = objPesosReales.dtEmbFechaped.HasValue ? DateOnly.FromDateTime(objPesosReales.dtEmbFechaped.Value) : default;
+            this.intCodProd = int.TryParse(objPesosReales.strTcdProduc, out int parsedCod) ? parsedCod : 0;
+            this.strDescProducto = objPesosReales.strProDesexp;
+            this.strTalla = objPesosReales.strTalDescri;
+            this.intTalla = (int)objPesosReales.intTcdCodtal;
+            this.strClte = objPesosReales.strCliDescripcion;
+            this.strPais = objPesosReales.strPaiDescri;
+            this.dcLibras = (decimal)objPesosReales.dcLbs1;
+            this.dcCostoVenta = 0m; // Inicializado en cero, se calculará posteriormente
             this.objDocFactRef = new NumDocXFactRef(this.intTranCam, this.strFact);
-
-            #endregion
-
             // Ejecución de métodos de cálculo
-            CalculoFob(dcPemPeso, dcMasters, dcPemPrecio);
+            CalculoFob((decimal)objPesosReales.dcPemPeso, (decimal)objPesosReales.dcMasters, (decimal)objPesosReales.dcPemPrecio);
             CalculoPrcXLb();
             CalculoCostoTotal();
         }
-
-        public RptVentaVsFactura(
-            string strTipo,
-            int intTranCam,
-            DateTime? Fecha,
-            string strCod,
-            string strDescProducto,
-            string strTalla,
-            int intTalla,
-            string strClte,
-            string strPais,
-            ConcurrentDictionary<int, string> dicFactu,
-            decimal dcLibras,
-            decimal dcPemPrecio,
-            decimal dcCostoVenta,
-            decimal dcPemPeso,
-            decimal dcMasters
-        )
+        public RptVentaVsFactura(FacturaResult objFactVentLocal)
         {
-            #region asignación y tratamiento de datos para conversiones
-
-            this.strTipo = strTipo;
-            this.intTranCam = intTranCam;
-
-            this.dtFecha = Fecha.HasValue ? DateOnly.FromDateTime(Fecha.Value) : default;
-
-            if (int.TryParse(strCod, out int parsedCod))
-                this.intCodProd = parsedCod;
-
-            this.strDescProducto = strDescProducto;
-            this.strTalla = strTalla;
-            this.intTalla = intTalla; // Asignación de la variable ignorada
-            this.strClte = strClte;
-            this.strPais = strPais;
-            this.strFact = dicFactu.GetValueOrDefault(this.intTranCam, string.Empty);
-            this.dcLibras = dcLibras;
-            this.dcCostoVenta = dcCostoVenta;
-
-            #endregion
-
-            // Ejecución de métodos de cálculo
-            CalculoFob(dcPemPeso, dcMasters, dcPemPrecio);
-            CalculoPrcXLb();
-            CalculoCostoTotal();
-        }
-
-        public RptVentaVsFactura(
-            //string strTipo,
-            string strTranCam,
-            DateTime? Fecha,
-            string strCod,
-            string strDescProducto,
-            string strTalla,
-            int intTalla,
-            string strClte,
-            string strPais,
-            ConcurrentDictionary<string, TracamAutoResult> dicMovCam,
-            decimal dcLibras,
-            decimal dcPemPrecio,
-            decimal dcCostoVenta,
-            decimal dcPemPeso,
-            decimal dcMasters
-        )
-        {
-            #region asignación y tratamiento de datos para conversiones
-
-            //this.strTipo = strTipo;
-            //this.intTranCam = intTranCam;
-
-            this.dtFecha = Fecha.HasValue ? DateOnly.FromDateTime(Fecha.Value) : default;
-
-            if (int.TryParse(strCod, out int parsedCod))
-                this.intCodProd = parsedCod;
-
-            this.strDescProducto = strDescProducto;
-            this.strTalla = strTalla;
-            this.intTalla = intTalla; // Asignación de la variable ignorada
-            this.strClte = strClte;
-            this.strPais = strPais;
-            TracamAutoResult objTracamAut = dicMovCam.GetValueOrDefault(strTranCam, null);
-            if (objTracamAut != null)
+            try
             {
-                this.strFact = objTracamAut.strTrcEmbfactura;
-                this.strTipo = objTracamAut.strTrsDescri;
-                this.intTranCam = (int)objTracamAut.intTrcNumsec;
+                this.strFact = LimpiarNumeroDocumento(objFactVentLocal.strMovNumdoc).ToString();
+                this.strTipo = "VENTA LOCAL";
+                this.intTranCam = 0;//(int)objFactVentLocal.intTcdNumero;
+                this.dtFecha = DateOnly.FromDateTime((DateTime)ParsearFechaCadena(objFactVentLocal.dtMovFecha));
+                this.intCodProd = int.TryParse(objFactVentLocal.strDetCodart, out int parsedCod) ? parsedCod : 0;
+                this.strDescProducto = objFactVentLocal.strDetNomart;
+                this.strTalla = objFactVentLocal.strTalDescri;
+                this.intTalla = (int)objFactVentLocal.intTalCodigo;
+                this.strClte = objFactVentLocal.strCliNomcom;
+                this.strPais = objFactVentLocal.strExpoPais;
+                this.dcLibras = (decimal)objFactVentLocal.dcDetLibras;
+                this.dcCostoVenta = 0m; // Inicializado en cero, se calculará posteriormente
+                this.objDocFactRef = new NumDocXFactRef(this.intTranCam, this.strFact);
+                decimal dcBase12 = objFactVentLocal.dcDetPoriva > 0 ?
+                        (((decimal?)(objFactVentLocal.dcDetValiva) ?? 0m) * 100) / (decimal)objFactVentLocal.dcDetPoriva : 0m;
+                this.dcFob = ((decimal?)(objFactVentLocal.dcDetSubtot) ?? 0m) - dcBase12;
+                this.dcPrcXLb = this.dcFob / this.dcLibras;
+                // Ejecución de métodos de cálculo
+                // CalculoFob((decimal)objFactVentLocal.dcDetLibras, (decimal)objFactVentLocal.dcDetCanti, (decimal)objFactVentLocal.dcDetPreuni);
+                //CalculoPrcXLb();
+                //CalculoCostoTotal();
             }
-            this.dcLibras = dcLibras;
-            this.dcCostoVenta = dcCostoVenta;
-
-            #endregion
-
-            // Ejecución de métodos de cálculo
-            CalculoFob(dcPemPeso, dcMasters, dcPemPrecio);
-            CalculoPrcXLb();
-            CalculoCostoTotal();
+            catch (Exception ex)
+            {
+                throw new Exception($"Error al crear RptVentaVsFactura desde FacturaResult: {ex.Message}", ex);
+            }
         }
 
-        public static List<RptVentaVsFactura> CrearListadoVentas(List<RepFactPesoRealResult> lstPesosReales)
-        {
-            if (!lstPesosReales.Any()) throw new ArgumentException("La lista de resultados está vacía.", nameof(lstPesosReales));
-            return (
-                    from peReal in lstPesosReales
-                    group peReal by new
-                    {
-                        peReal.intTcdNumero,
-                        peReal.strTcdProduc,
-                        peReal.strProDesexp,
-                        peReal.strTalDescri,
-                        peReal.intTcdCodtal,
-                        peReal.strCliDescripcion,
-                        peReal.strPaiDescri,
-                        peReal.dtEmbFechaped,
-                        peReal.strFact,
-                    } into grpPeReal
-                    select new RptVentaVsFactura(
-                        "VENTA EXPORTACION",
-                        (int)grpPeReal.Key.intTcdNumero,
-                        grpPeReal.Key.dtEmbFechaped,
-                        grpPeReal.Key.strTcdProduc,
-                        grpPeReal.Key.strProDesexp,
-                        grpPeReal.Key.strTalDescri,
-                        (int)grpPeReal.Key.intTcdCodtal,
-                        grpPeReal.Key.strCliDescripcion,
-                        grpPeReal.Key.strPaiDescri,
-                        grpPeReal.Key.strFact,
-                        grpPeReal.Sum(x => (decimal)x.dcLbs1),
-                        grpPeReal.Sum(x => (decimal)x.dcPemPrecio),
-                        0m,
-                        grpPeReal.Sum(x => (decimal)x.dcPemPeso),
-                        grpPeReal.Sum(x => (decimal)x.dcMasters)
-                        )).ToList();
-        }
-
-
-        public static List<RptVentaVsFactura> CrearListadoFacturas(List<FacturaResult> lstFacturas, ConcurrentDictionary<string, TracamAutoResult> dicMovCam)
-        {
-            if (!lstFacturas.Any()) throw new ArgumentException("La lista de resultados está vacía.", nameof(lstFacturas));
-            return (
-                    from peReal in lstFacturas
-                    group peReal by new
-                    {
-                        peReal.strMovTipo,
-                        peReal.strDetCodart,
-                        peReal.strDetNomart,
-                        peReal.strTalDescri,
-                        peReal.intTalCodigo,
-                        peReal.strCliNomcom,
-                        peReal.strExpoPais,
-                        peReal.dtMovFecha,
-                        peReal.strMovNumdoc,
-                    } into grpPeReal
-                    select new RptVentaVsFactura(
-                        //grpPeReal.Key.strMovTipo ?? "VENTA EXPORTACION",
-                        //// AQUÍ VA EL MAPEO DEL NÚMERO LIMPIO PARA intTranCam
-                        grpPeReal.Key.strMovNumdoc,
-                        ParsearFechaCadena(grpPeReal.Key.dtMovFecha),
-                        grpPeReal.Key.strDetCodart ?? "",
-                        grpPeReal.Key.strDetNomart ?? "",
-                        grpPeReal.Key.strTalDescri ?? "",
-                        (int)(grpPeReal.Key.intTalCodigo ?? 0),
-                        grpPeReal.Key.strCliNomcom ?? "",
-                        grpPeReal.Key.strExpoPais ?? "",
-                        dicMovCam,               //enviamos el diccionario para obtener el número de factura limpio
-                        grpPeReal.Sum(x => (decimal)(x.dcDetLibras ?? 0)),
-                        grpPeReal.Max(x => (decimal)(x.dcDetPreuni ?? 0)), // Usar Max o Average para precios
-                        0m,
-                        grpPeReal.Sum(x => (decimal)(x.dcDetCanti ?? 0)),
-                        0m // dcMasters (puedes reemplazar 0m por el campo adecuado si existe en FacturaResult)
-                    )
-                   ).ToList();
-        }
-
-        public static List<RptVentaVsFactura> CrearListadoFacturas(List<FacturaResult> lstFacturas, ConcurrentDictionary<int, string> dicFactu)
-        {
-            if (!lstFacturas.Any()) throw new ArgumentException("La lista de resultados está vacía.", nameof(lstFacturas));
-            return (
-                    from peReal in lstFacturas
-                    group peReal by new
-                    {
-                        peReal.strMovTipo,
-                        peReal.strDetCodart,
-                        peReal.strDetNomart,
-                        peReal.strTalDescri,
-                        peReal.intTalCodigo,
-                        peReal.strCliNomcom,
-                        peReal.strExpoPais,
-                        peReal.dtMovFecha,
-                        peReal.strMovNumdoc,
-                    } into grpPeReal
-                    select new RptVentaVsFactura(
-                        grpPeReal.Key.strMovTipo ?? "VENTA EXPORTACION",
-                        // AQUÍ VA EL MAPEO DEL NÚMERO LIMPIO PARA intTranCam
-                        LimpiarNumeroDocumento(grpPeReal.Key.strMovNumdoc),
-                        ParsearFechaCadena(grpPeReal.Key.dtMovFecha),
-                        grpPeReal.Key.strDetCodart ?? "",
-                        grpPeReal.Key.strDetNomart ?? "",
-                        grpPeReal.Key.strTalDescri ?? "",
-                        (int)(grpPeReal.Key.intTalCodigo ?? 0),
-                        grpPeReal.Key.strCliNomcom ?? "",
-                        grpPeReal.Key.strExpoPais ?? "",
-                        dicFactu,               //enviamos el diccionario para obtener el número de factura limpio
-                        grpPeReal.Sum(x => (decimal)(x.dcDetLibras ?? 0)),
-                        grpPeReal.Max(x => (decimal)(x.dcDetPreuni ?? 0)), // Usar Max o Average para precios
-                        0m,
-                        grpPeReal.Sum(x => (decimal)(x.dcDetCanti ?? 0)),
-                        0m // dcMasters (puedes reemplazar 0m por el campo adecuado si existe en FacturaResult)
-                    )
-                   ).ToList();
-        }
 
         #region Calculos Automaticos del Reporte
         public void CalculosReporte()

@@ -1,96 +1,138 @@
 ﻿using CostManagement.Infraestructura.Utils;
 using Newtonsoft.Json;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
+using System.Reflection;
 using System.Text.Json.Serialization;
 
 namespace CostManagement.Aplicación.DTos
 {
     public class DataTablesResultDto
     {
-            [JsonProperty("Table")]
-            public List<Dictionary<string, object>>? Table { get; set; }
+        [JsonProperty("Table")]
+        public List<Dictionary<string, object>>? Table { get; set; }
 
-            [JsonProperty("Table1", NullValueHandling = NullValueHandling.Ignore)]
-            public List<Dictionary<string, object>>? Table1 { get; set; }
+        [JsonProperty("Table1", NullValueHandling = NullValueHandling.Ignore)]
+        public List<Dictionary<string, object>>? Table1 { get; set; }
 
-            [JsonProperty("Table2", NullValueHandling = NullValueHandling.Ignore)]
-            public List<Dictionary<string, object>>? Table2 { get; set; }
+        [JsonProperty("Table2", NullValueHandling = NullValueHandling.Ignore)]
+        public List<Dictionary<string, object>>? Table2 { get; set; }
 
-            /// <summary>
-            /// Crea resultado desde DataTable
-            /// </summary>
-            public static DataTablesResultDto FromDataTable(DataTable dt, int tableIndex = 0)
+        [JsonProperty("Table3", NullValueHandling = NullValueHandling.Ignore)]
+        public List<Dictionary<string, object>>? Table3 { get; set; }
+
+        /// <summary>
+        /// Crea resultado desde DataTable
+        /// </summary>
+        public static DataTablesResultDto FromDataTable(DataTable dt, int tableIndex = 0)
+        {
+            var result = new DataTablesResultDto();
+            var dataList = ConvertDataTableToList(dt);
+
+            switch (tableIndex)
             {
-                var result = new DataTablesResultDto();
-                var dataList = ConvertDataTableToList(dt);
-
-                switch (tableIndex)
-                {
-                    case 0:
-                        result.Table = dataList;
-                        break;
-                    case 1:
-                        result.Table1 = dataList;
-                        break;
-                    case 2:
-                        result.Table2 = dataList;
-                        break;
-                }
-
-                return result;
+                case 0:
+                    result.Table = dataList;
+                    break;
+                case 1:
+                    result.Table1 = dataList;
+                    break;
+                case 2:
+                    result.Table2 = dataList;
+                    break;
+                case 3:
+                    result.Table3 = dataList;
+                    break;
             }
 
-            /// <summary>
-            /// Crea resultado desde List<T> usando reflexión y atributos
-            /// </summary>
-            public static DataTablesResultDto FromList<T>(List<T> data, int tableIndex = 0)
+            return result;
+        }
+
+        /// <summary>
+        /// Crea resultado desde List<T> usando reflexión y atributos
+        /// </summary>
+        public static DataTablesResultDto FromList<T>(List<T> data, int tableIndex = 0)
+        {
+            var result = new DataTablesResultDto();
+            var dataList = data.AListaDeDiccionarios(); // Usa el nuevo método helper
+
+            switch (tableIndex)
             {
-                var result = new DataTablesResultDto();
-                var dataList = data.AListaDeDiccionarios(); // Usa el nuevo método helper
-
-                switch (tableIndex)
-                {
-                    case 0:
-                        result.Table = dataList;
-                        break;
-                    case 1:
-                        result.Table1 = dataList;
-                        break;
-                    case 2:
-                        result.Table2 = dataList;
-                        break;
-                }
-
-                return result;
+                case 0:
+                    result.Table = dataList;
+                    break;
+                case 1:
+                    result.Table1 = dataList;
+                    break;
+                case 2:
+                    result.Table2 = dataList;
+                    break;
+                case 3:
+                    result.Table3 = dataList;
+                    break;
             }
 
-            /// <summary>
-            /// Crea resultado desde List<T> convirtiéndolo primero a DataTable
-            /// </summary>
-            public static DataTablesResultDto FromListViaDataTable<T>(List<T> data, int tableIndex = 0)
-            {
-                var dataTable = data.ADataTable(); // Usa el ADataTable que respeta atributos
+            return result;
+        }
+
+        /// <summary>
+        /// Crea resultado desde List<T> convirtiéndolo primero a DataTable
+        /// </summary>
+        public static DataTablesResultDto FromListViaDataTable<T>(List<T> data, int tableIndex = 0)
+        {
+            var dataTable = data.ADataTable(); // Usa el ADataTable que respeta atributos
             return FromDataTable(dataTable, tableIndex);
-            }
+        }
 
-            /// <summary>
-            /// Convierte DataTable a List<Dictionary>
-            /// </summary>
-            private static List<Dictionary<string, object>> ConvertDataTableToList(DataTable dt)
+        /// <summary>
+        /// Convierte DataTable a List<Dictionary>
+        /// </summary>
+        private static List<Dictionary<string, object>> ConvertDataTableToList(DataTable dt)
+        {
+            var rows = new List<Dictionary<string, object>>();
+
+            foreach (DataRow dr in dt.Rows)
             {
-                var rows = new List<Dictionary<string, object>>();
-
-                foreach (DataRow dr in dt.Rows)
+                var row = new Dictionary<string, object>();
+                foreach (DataColumn col in dt.Columns)
                 {
-                    var row = new Dictionary<string, object>();
-                    foreach (DataColumn col in dt.Columns)
-                    {
-                        row[col.ColumnName] = dr[col] == DBNull.Value ? null : dr[col];
-                    }
-                    rows.Add(row);
+                    row[col.ColumnName] = dr[col] == DBNull.Value ? null : dr[col];
                 }
-
-                return rows;
+                rows.Add(row);
             }
+
+            return rows;
+        }
+
+        /// <summary>
+        /// Convierte un solo objeto a List<Dictionary> (una fila).
+        /// Nombre de clave: [Column] → [JsonProperty] → nombre de la propiedad.
+        /// </summary>
+        public static List<Dictionary<string, object>> FromObject<T>(T item)
+        {
+            var row = new Dictionary<string, object>();
+
+            var props = typeof(T)
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => p.CanRead);
+
+            foreach (var prop in props)
+                row[GetColumnName(prop)] = prop.GetValue(item) ?? DBNull.Value;
+
+            return new List<Dictionary<string, object>> { row };
+        }
+
+        private static string GetColumnName(PropertyInfo prop)
+        {
+            var colAttr = prop.GetCustomAttribute<ColumnAttribute>();
+            if (!string.IsNullOrEmpty(colAttr?.Name))
+                return colAttr!.Name!;
+
+            var jsonAttr = prop.GetCustomAttribute<JsonPropertyAttribute>();
+            if (!string.IsNullOrEmpty(jsonAttr?.PropertyName))
+                return jsonAttr!.PropertyName!;
+
+            return prop.Name;
         }
     }
+}
