@@ -6,10 +6,13 @@ using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Repository.Interface;
 using CostManagement.Infraestructura.Repository.Services;
 using CostManagement.Infraestructura.Utils;
+using CostManagementService.Aplicacion.DTos;
 using CostManagementService.Aplicación.DTos;
+using CostManagementService.Dominio.Entidades;
 using CostManagementService.Dominio.Reglas;
 using DocumentFormat.OpenXml.Drawing.Charts;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
@@ -21,6 +24,7 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using static CostManagement.Aplicación.DTos.HaberDistribucionDTO;
 using static CostManagementService.Dominio.Enums.EnumLiquidacionDto;
 
 namespace CostManagement.Aplicación.Features
@@ -38,6 +42,7 @@ namespace CostManagement.Aplicación.Features
         private readonly MotorMergeValorizacion _objMotorMergeVal;
         private readonly MotorGrafoTopologico _objMotorGrafo;
         private readonly MotorProcesoParametro _objMotorProceso;
+        private readonly MotorWarren _objMotorWarren;
         public CalculoCostosFeature(
             IMateriaPrima objMateriaPrima,
             ICostoMaterialEmpaque objCostoMaterialEmpaque,
@@ -58,6 +63,7 @@ namespace CostManagement.Aplicación.Features
             _objMotorGrafo = new MotorGrafoTopologico(_objMotorProrra, _objMotorAsigPrec, _objLogger);
             _objMotorMergeVal = new MotorMergeValorizacion(_objLogger);
             _objMotorProceso = new MotorProcesoParametro(_objLogger);
+            _objMotorWarren = new MotorWarren(_objLogger);
         }
 
         #region Flujo Materia Prima Fresco
@@ -117,6 +123,9 @@ namespace CostManagement.Aplicación.Features
             {
                 var TareaFrsVal = _objMateriaPrima.ObtenerLstMatPrimValorizada(dtFechaInicio, dtFechaFin);
                 var tareaFrs = _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio, dtFechaFin);
+                int diasEnMes = DateTime.DaysInMonth(dtFechaInicio.Year, dtFechaInicio.Month);
+                DateOnly dtFechaCorte = new DateOnly(dtFechaInicio.Year, dtFechaInicio.Month, diasEnMes);
+                var tareaWarren = _objProcesoParametro.ConsultarParametrosWarren(dtFechaCorte);
                 await Task.WhenAll(TareaFrsVal, tareaFrs);
                 objDataProceso.lstLiqFresco = await tareaFrs;
                 if (objDataProceso.lstLiqFresco == null || !objDataProceso.lstLiqFresco.Any())
@@ -130,12 +139,20 @@ namespace CostManagement.Aplicación.Features
 
 
 
+                var tareaInfoProd = _objMateriaPrima.ObtenerInfoProd(
+                    objDataProceso.lstLiqFresco.Select(p => p.intCodProd.ToString()).Distinct().ToList()
+                    );
                 lstLiquidaciones.AddRange(objDataProceso.lstLiqFresco);
                 await Task.WhenAll(
-                     _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(lstLiquidaciones)
+                     _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(lstLiquidaciones),
+                     tareaInfoProd
                     );
+                objDataProceso.lstInfoProd = await tareaInfoProd;
                 _objMotorProceso.AsignarCostosProcesosFresco(objDataProceso);
 
+                // NUEVO: capa Warren PFR EN/SH usando WEN/WSH guardado.
+                var parametrosWarren = await tareaWarren;
+                _objMotorWarren.AplicarGuardado(objDataProceso.lstLiqFresco, parametrosWarren);
                 return lstLiquidaciones;
             }
             catch (Exception objException)
@@ -342,6 +359,699 @@ namespace CostManagement.Aplicación.Features
 
         #endregion
 
+
+        #region Flujo Auditoria Mat Empaque
+        private static string NormalizarAudMatEmp(string? valor)
+        {
+            return (valor ?? string.Empty).Trim();
+        }
+
+        private static decimal NormalizarCantidadAudMatEmp(decimal valor)
+        {
+            return Math.Round(valor, 8);
+        }
+
+        private static (
+            int Lote,
+            string Producto,
+            int Item,
+            decimal Cantidad)
+            CrearClaveAudMatEmp(CostoMatEmpProdXCietunDto item)
+        {
+            return (
+                item.intLiqLote,
+                NormalizarAudMatEmp(item.strProCodCor),
+                item.intEftItem,
+                NormalizarCantidadAudMatEmp(Convert.ToDecimal(item.dbEftCantidad))
+            );
+        }
+
+        private static (
+            int Lote,
+            string Producto,
+            int Item,
+            decimal Cantidad)
+            CrearClaveAudMatEmp(CostoMatEmpaDto item)
+        {
+            return (
+                item.intLiqLote,
+                NormalizarAudMatEmp(item.strProCodCor),
+                item.intEftItem,
+                NormalizarCantidadAudMatEmp(Convert.ToDecimal(item.dcEftCantidad ?? 0f))
+            );
+        }
+
+        private static List<CostoMatEmpProdXCietunDto> ClonarFichaAudMatEmp(
+            IEnumerable<CostoMatEmpProdXCietunDto> source)
+        {
+            return source.Select(x => new CostoMatEmpProdXCietunDto
+            {
+                intLiqLote = x.intLiqLote,
+                intCtuNumero = x.intCtuNumero,
+                strProCodCor = x.strProCodCor,
+                intEftItem = x.intEftItem,
+                strEftGrupo = x.strEftGrupo,
+                dbEftCantidad = x.dbEftCantidad,
+                dcLibrasXMasters = x.dcLibrasXMasters,
+                dcMedCodigo = x.dcMedCodigo,
+                strEmbCodigo = x.strEmbCodigo,
+                strTipCodigo = x.strTipCodigo,
+                dbEmbPeso = x.dbEmbPeso,
+                dcCostoDesperdicioBobina = x.dcCostoDesperdicioBobina,
+                dbPrecioUnit = 0d,
+                dbPrecioUltConsumo = 0d,
+                strEstadoFicha = "X",
+                dtFechaEgreso = default
+            }).ToList();
+        }
+
+        private static (
+            decimal Precio,
+            string Origen,
+            DateOnly? Fecha)
+            ResolverPrecioAudMatEmp(
+                decimal? precioCt,
+                DateOnly? fechaCt,
+                decimal? precioMov2,
+                DateOnly? fechaMov2,
+                decimal? precioCompra,
+                DateOnly? fechaCompra,
+                decimal? precioBodite,
+                DateOnly? fechaBodite)
+        {
+            if ((precioCt ?? 0m) > 0m)
+                return (precioCt!.Value, "CT", fechaCt);
+
+            if ((precioMov2 ?? 0m) > 0m)
+                return (precioMov2!.Value, "M2", fechaMov2);
+
+            if ((precioCompra ?? 0m) > 0m)
+                return (precioCompra!.Value, "CO", fechaCompra);
+
+            if ((precioBodite ?? 0m) > 0m)
+                return (precioBodite!.Value, "BO", fechaBodite);
+
+            return (0m, "SP", null);
+        }
+
+        private static bool FuentesPrecioDifierenAudMatEmp(params decimal?[] precios)
+        {
+            var valores = precios
+                .Where(x => x.HasValue && x.Value > 0m)
+                .Select(x => x!.Value)
+                .Distinct()
+                .ToList();
+
+            if (valores.Count < 2)
+                return false;
+
+            decimal minimo = valores.Min();
+            decimal maximo = valores.Max();
+
+            if (minimo <= 0m)
+                return false;
+
+            return ((maximo - minimo) / minimo) > 0.05m;
+        }
+
+        public async Task<ResultadoAuditoriaMaterialEmpaqueDto> AuditarMaterialEmpaque(
+            DateOnly dtFechaInicio,
+            DateOnly dtFechaFin,
+            string? strProducto = null,
+            int? intLote = null,
+            bool blSoloErrores = false)
+        {
+            var resultado = new ResultadoAuditoriaMaterialEmpaqueDto();
+
+            try
+            {
+                // ============================================================
+                // 1. LIQUIDACIONES FRESCO + REPROCESO
+                // ============================================================
+                var tareaFrs = _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(
+                    dtFechaInicio,
+                    dtFechaFin,
+                    false);
+
+                var tareaRpc = _objMateriaPrima.ObtenerMatPrimValRpcsXRangoFecha(
+                    dtFechaInicio,
+                    dtFechaFin,
+                    false);
+
+                await Task.WhenAll(tareaFrs, tareaRpc);
+
+                var lstFrs = await tareaFrs;
+                var lstRpc = await tareaRpc;
+
+                if (!lstFrs.Any() && !lstRpc.Any())
+                    return resultado;
+
+                var lstLotesFrs = lstFrs
+                    .Select(x => (decimal)x.intLote)
+                    .Distinct()
+                    .ToList();
+
+                var lstLotesRpc = lstRpc
+                    .Select(x => x.dcLotSecuencial)
+                    .Distinct()
+                    .ToList();
+
+                // ============================================================
+                // 2. FICHA TÉCNICA + CATÁLOGOS DE REGLA
+                // ============================================================
+                var tareaFichaFrs = _objMateriaPrima.ObtenerCostMatEmpFrsProdXLiq(lstLotesFrs);
+                var tareaFichaRpc = _objMateriaPrima.ObtenerCostMatEmpRpcProdXLiq(lstLotesRpc);
+                var tareaEtiquetas = _objMateriaPrima.ConsultarItemEtiqueta();
+                var tareaMasterCajita = _objMateriaPrima.ConsultarItemMasterCajita();
+
+                await Task.WhenAll(
+                    tareaFichaFrs,
+                    tareaFichaRpc,
+                    tareaEtiquetas,
+                    tareaMasterCajita);
+
+                var lstFichaFrs = await tareaFichaFrs;
+                var lstFichaRpc = await tareaFichaRpc;
+                var dictEtiquetas = await tareaEtiquetas;
+                var dictMasterCajita = await tareaMasterCajita;
+
+                var hsEtiqueta = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CAM",
+            "VE"
+        };
+
+                var hsReempaque = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "R3",
+            "VR"
+        };
+
+                var lstFicha = lstFichaFrs
+                    .Concat(lstFichaRpc)
+                    .ToList();
+
+                if (!string.IsNullOrWhiteSpace(strProducto))
+                {
+                    string productoFiltro = NormalizarAudMatEmp(strProducto);
+                    lstFicha = lstFicha
+                        .Where(x => NormalizarAudMatEmp(x.strProCodCor) == productoFiltro)
+                        .ToList();
+                }
+
+                if (intLote.HasValue)
+                {
+                    lstFicha = lstFicha
+                        .Where(x => x.intLiqLote == intLote.Value)
+                        .ToList();
+                }
+
+                if (!lstFicha.Any())
+                    return resultado;
+
+                // ============================================================
+                // 3. REGLA DE INCLUSIÓN, SIN ELIMINAR ÍTEMS
+                // ============================================================
+                var dictReglas = new Dictionary<
+                    (int Lote, string Producto, int Item, decimal Cantidad),
+                    (bool Incluido, string Regla)>();
+
+                foreach (var item in lstFicha)
+                {
+                    bool incluido = true;
+                    string regla = "FICHA_COMPLETA";
+
+                    string tipo = NormalizarAudMatEmp(item.strTipCodigo);
+                    string itemKey = item.intEftItem.ToString();
+
+                    if (hsEtiqueta.Contains(tipo))
+                    {
+                        regla = "SOLO_ETIQUETA";
+                        incluido = dictEtiquetas.ContainsKey(itemKey);
+                    }
+                    else if (hsReempaque.Contains(tipo))
+                    {
+                        regla = "MASTER_CAJITA";
+                        incluido = dictMasterCajita.ContainsKey(itemKey);
+                    }
+
+                    dictReglas[CrearClaveAudMatEmp(item)] = (incluido, regla);
+                }
+
+                // ============================================================
+                // 4. CAPTURAR CADA FUENTE EN LISTAS INDEPENDIENTES
+                //    La lista original conserva exclusivamente el precio CT que
+                //    ya cargan ObtenerCostMatEmp*ProdXLiq.
+                // ============================================================
+                var lstMov2 = ClonarFichaAudMatEmp(lstFicha);
+                var lstCompra = ClonarFichaAudMatEmp(lstFicha);
+                var lstBodite = ClonarFichaAudMatEmp(lstFicha);
+
+                await Task.WhenAll(
+                    _objMateriaPrima.ObtenerCostoPromMov2XFichaTecnica(
+                        lstMov2,
+                        dtFechaInicio,
+                        dtFechaFin),
+
+                    _objMateriaPrima.ObtenerCostoPromMov1XFichaTecnica(
+                        lstCompra,
+                        dtFechaInicio,
+                        dtFechaFin),
+
+                    _objMateriaPrima.ObtenerCostoPromBoditeXFichaTecnica(
+                        lstBodite,
+                        dtFechaInicio,
+                        dtFechaFin));
+
+                var dictMov2 = lstMov2
+                    .Where(x => (x.dbPrecioUnit ?? 0d) > 0d)
+                    .GroupBy(x => x.intEftItem)
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                var dictCompra = lstCompra
+                    .Where(x => (x.dbPrecioUnit ?? 0d) > 0d)
+                    .GroupBy(x => x.intEftItem)
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                var dictBodite = lstBodite
+                    .Where(x => (x.dbPrecioUnit ?? 0d) > 0d)
+                    .GroupBy(x => x.intEftItem)
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                // ============================================================
+                // 5. LEER LO QUE YA ESTÁ GUARDADO EN COSTOS
+                // ============================================================
+                var lstLotesAuditoria = lstFicha
+                    .Select(x => x.intLiqLote)
+                    .Distinct()
+                    .ToList();
+
+                var lstActualBD = await _objCostoMaterialEmpaque
+                    .ObtenerCostoEmpaqueXLote(lstLotesAuditoria);
+
+                // Evita traer como ME014 productos históricos del mismo lote que no
+                // forman parte de la liquidación/ficha que estamos auditando.
+                var hsProductosActuales = lstFicha
+                    .Select(x => (
+                        x.intLiqLote,
+                        Producto: NormalizarAudMatEmp(x.strProCodCor)))
+                    .ToHashSet();
+
+                lstActualBD = lstActualBD
+                    .Where(x => hsProductosActuales.Contains((
+                        x.intLiqLote,
+                        NormalizarAudMatEmp(x.strProCodCor))))
+                    .ToList();
+
+                if (!string.IsNullOrWhiteSpace(strProducto))
+                {
+                    string productoFiltro = NormalizarAudMatEmp(strProducto);
+                    lstActualBD = lstActualBD
+                        .Where(x => NormalizarAudMatEmp(x.strProCodCor) == productoFiltro)
+                        .ToList();
+                }
+
+                var dictDetalleBD = lstActualBD
+                    .GroupBy(CrearClaveAudMatEmp)
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                var dictCabeceraBD = lstActualBD
+                    .GroupBy(x => (
+                        x.intLiqLote,
+                        Producto: NormalizarAudMatEmp(x.strProCodCor)))
+                    .ToDictionary(
+                        g => g.Key,
+                        g => Convert.ToDecimal(g.First().intTotal));
+
+                // ============================================================
+                // 6. DETALLE DE AUDITORÍA
+                // ============================================================
+                foreach (var item in lstFicha)
+                {
+                    var banderas = new List<string>();
+                    var claveFicha = CrearClaveAudMatEmp(item);
+                    var regla = dictReglas[claveFicha];
+
+                    decimal? precioCt = null;
+                    DateOnly? fechaCt = null;
+
+                    // La lista base solo llega con CT cargado en este punto.
+                    if ((item.dbPrecioUnit ?? 0d) > 0d &&
+                        string.Equals(item.strEstadoFicha, "E", StringComparison.OrdinalIgnoreCase))
+                    {
+                        precioCt = Convert.ToDecimal(item.dbPrecioUnit!.Value);
+
+                        if (item.dtFechaEgreso != default)
+                            fechaCt = item.dtFechaEgreso;
+                    }
+
+                    dictMov2.TryGetValue(item.intEftItem, out var fuenteMov2);
+                    dictCompra.TryGetValue(item.intEftItem, out var fuenteCompra);
+                    dictBodite.TryGetValue(item.intEftItem, out var fuenteBodite);
+
+                    decimal? precioMov2 = fuenteMov2?.dbPrecioUnit != null
+                        ? Convert.ToDecimal(fuenteMov2.dbPrecioUnit.Value)
+                        : null;
+
+                    DateOnly? fechaMov2 = fuenteMov2 != null && fuenteMov2.dtFechaEgreso != default
+                        ? fuenteMov2.dtFechaEgreso
+                        : null;
+
+                    decimal? precioCompra = fuenteCompra?.dbPrecioUnit != null
+                        ? Convert.ToDecimal(fuenteCompra.dbPrecioUnit.Value)
+                        : null;
+
+                    DateOnly? fechaCompra = fuenteCompra != null && fuenteCompra.dtFechaEgreso != default
+                        ? fuenteCompra.dtFechaEgreso
+                        : null;
+
+                    decimal? precioBodite = fuenteBodite?.dbPrecioUnit != null
+                        ? Convert.ToDecimal(fuenteBodite.dbPrecioUnit.Value)
+                        : null;
+
+                    DateOnly? fechaBodite = fuenteBodite != null && fuenteBodite.dtFechaEgreso != default
+                        ? fuenteBodite.dtFechaEgreso
+                        : null;
+
+                    var seleccionado = ResolverPrecioAudMatEmp(
+                        precioCt,
+                        fechaCt,
+                        precioMov2,
+                        fechaMov2,
+                        precioCompra,
+                        fechaCompra,
+                        precioBodite,
+                        fechaBodite);
+
+                    dictDetalleBD.TryGetValue(claveFicha, out var actualBD);
+
+                    if (regla.Incluido && seleccionado.Precio <= 0m)
+                        banderas.Add("ME001");
+
+                    decimal librasMaster = Convert.ToDecimal(item.dcLibrasXMasters);
+                    decimal cantidadFicha = Convert.ToDecimal(item.dbEftCantidad);
+
+                    if (regla.Incluido && librasMaster <= 0m)
+                        banderas.Add("ME002");
+
+                    if (FuentesPrecioDifierenAudMatEmp(
+                        precioCt,
+                        precioMov2,
+                        precioCompra,
+                        precioBodite))
+                    {
+                        banderas.Add("ME004");
+                    }
+
+                    if (seleccionado.Fecha.HasValue &&
+                        (seleccionado.Fecha.Value < dtFechaInicio ||
+                         seleccionado.Fecha.Value > dtFechaFin))
+                    {
+                        banderas.Add("ME005");
+                    }
+
+                    if (regla.Incluido && actualBD == null)
+                        banderas.Add("ME015");
+
+                    decimal precioActualBD = actualBD?.dcCosPro ?? 0m;
+
+                    if (regla.Incluido &&
+                        actualBD != null &&
+                        Math.Abs(precioActualBD - seleccionado.Precio) > 0.0001m)
+                    {
+                        banderas.Add("ME006");
+                    }
+
+                    if (!regla.Incluido && actualBD != null)
+                    {
+                        if (regla.Regla == "SOLO_ETIQUETA")
+                            banderas.Add("ME009");
+                        else if (regla.Regla == "MASTER_CAJITA")
+                            banderas.Add("ME010");
+                    }
+
+                    decimal costoMaster = regla.Incluido
+                        ? seleccionado.Precio * cantidadFicha
+                        : 0m;
+
+                    decimal costoLibra = regla.Incluido && librasMaster > 0m
+                        ? costoMaster / librasMaster
+                        : 0m;
+
+                    resultado.lstDetalle.Add(new AuditoriaMaterialEmpaqueDto
+                    {
+                        intLote = item.intLiqLote,
+                        strProducto = NormalizarAudMatEmp(item.strProCodCor),
+                        strTipoProceso = string.IsNullOrWhiteSpace(item.strTipCodigo)
+                            ? "FRESCO"
+                            : item.strTipCodigo.Trim(),
+                        intCierreTunel = item.intCtuNumero,
+
+                        intItem = item.intEftItem,
+                        strItemDescripcion = actualBD?.strIteDesCor ?? item.intEftItem.ToString(),
+                        strGrupoFicha = item.strEftGrupo ?? string.Empty,
+                        strLineaActualBD = actualBD?.strLinea ?? string.Empty,
+                        strGrupoActualBD = actualBD?.strGrupo ?? string.Empty,
+
+                        dcCantidadFicha = cantidadFicha,
+                        dcLibrasMaster = librasMaster,
+
+                        blIncluidoCosto = regla.Incluido,
+                        strReglaEmpaque = regla.Regla,
+
+                        dcPrecioCierreTunel = precioCt,
+                        dtPrecioCierreTunel = fechaCt,
+
+                        dcPrecioMov2 = precioMov2,
+                        dtPrecioMov2 = fechaMov2,
+
+                        dcPrecioCompra = precioCompra,
+                        dtPrecioCompra = fechaCompra,
+
+                        dcPrecioBodite = precioBodite,
+                        dtPrecioBodite = fechaBodite,
+
+                        dcPrecioSeleccionado = seleccionado.Precio,
+                        strOrigenSeleccionado = seleccionado.Origen,
+                        dtFechaPrecioSeleccionado = seleccionado.Fecha,
+
+                        blExisteEnBD = actualBD != null,
+                        blExisteEnFichaActual = true,
+                        dcPrecioActualBD = precioActualBD,
+                        dcCantidadActualBD = Convert.ToDecimal(actualBD?.dcEftCantidad ?? 0f),
+                        strOrigenActualBD = actualBD?.strEstadoEmpaque ?? string.Empty,
+
+                        dcCostoItemMaster = Math.Round(costoMaster, 8),
+                        dcCostoItemLibra = Math.Round(costoLibra, 8),
+
+                        strBandera = string.Join("|", banderas.Distinct()),
+                        strObservacion = banderas.Any()
+                            ? "REVISAR"
+                            : regla.Incluido
+                                ? "OK"
+                                : "EXCLUIDO_POR_REGLA"
+                    });
+                }
+
+                // ============================================================
+                // 7. DETECTAR ÍTEMS GUARDADOS QUE YA NO EXISTEN EN LA FICHA
+                // ============================================================
+                var hsFichaActual = lstFicha
+                    .Select(CrearClaveAudMatEmp)
+                    .ToHashSet();
+
+                foreach (var bd in lstActualBD)
+                {
+                    var key = CrearClaveAudMatEmp(bd);
+
+                    if (hsFichaActual.Contains(key))
+                        continue;
+
+                    resultado.lstDetalle.Add(new AuditoriaMaterialEmpaqueDto
+                    {
+                        intLote = bd.intLiqLote,
+                        strProducto = NormalizarAudMatEmp(bd.strProCodCor),
+                        strTipoProceso = "REGISTRO_ANTERIOR",
+                        intItem = bd.intEftItem,
+                        strItemDescripcion = bd.strIteDesCor ?? bd.intEftItem.ToString(),
+                        strGrupoFicha = string.Empty,
+                        strLineaActualBD = bd.strLinea ?? string.Empty,
+                        strGrupoActualBD = bd.strGrupo ?? string.Empty,
+                        dcCantidadFicha = 0m,
+                        dcLibrasMaster = Convert.ToDecimal(bd.dcLibxMaster ?? 0f),
+                        blIncluidoCosto = false,
+                        strReglaEmpaque = "NO_EXISTE_FICHA_ACTUAL",
+                        blExisteEnBD = true,
+                        blExisteEnFichaActual = false,
+                        dcPrecioActualBD = bd.dcCosPro ?? 0m,
+                        dcCantidadActualBD = Convert.ToDecimal(bd.dcEftCantidad ?? 0f),
+                        strOrigenActualBD = bd.strEstadoEmpaque ?? string.Empty,
+                        strBandera = "ME014",
+                        strObservacion = "Ítem almacenado en BD que ya no coincide con la ficha técnica actual."
+                    });
+                }
+
+                // ============================================================
+                // 8. LIBRAS POR LOTE + PRODUCTO
+                // ============================================================
+                var dictLibras = new Dictionary<(int Lote, string Producto), decimal>();
+
+                void SumarLibras(int lote, string producto, decimal libras)
+                {
+                    var key = (lote, NormalizarAudMatEmp(producto));
+
+                    if (!dictLibras.ContainsKey(key))
+                        dictLibras[key] = 0m;
+
+                    dictLibras[key] += libras;
+                }
+
+                var hsFrs = lstFichaFrs
+                    .Select(x => (x.intLiqLote, NormalizarAudMatEmp(x.strProCodCor)))
+                    .ToHashSet();
+
+                var hsRpc = lstFichaRpc
+                    .Select(x => (x.intLiqLote, NormalizarAudMatEmp(x.strProCodCor)))
+                    .ToHashSet();
+
+                foreach (var frs in lstFrs)
+                {
+                    string producto = frs.intCodProd?.ToString() ?? string.Empty;
+                    var key = (frs.intLote, NormalizarAudMatEmp(producto));
+
+                    if (!hsFrs.Contains(key))
+                        continue;
+
+                    SumarLibras(
+                        frs.intLote,
+                        producto,
+                        Convert.ToDecimal(frs.dcLibras));
+                }
+
+                foreach (var rpc in lstRpc)
+                {
+                    int lote = Convert.ToInt32(rpc.dcLotSecuencial);
+                    string producto = rpc.intCodProd?.ToString() ?? string.Empty;
+                    var key = (lote, NormalizarAudMatEmp(producto));
+
+                    if (!hsRpc.Contains(key))
+                        continue;
+
+                    SumarLibras(
+                        lote,
+                        producto,
+                        Convert.ToDecimal(rpc.dcLibras));
+                }
+
+                // ============================================================
+                // 9. RESUMEN LOTE + PRODUCTO
+                // ============================================================
+                foreach (var grupo in resultado.lstDetalle
+                    .GroupBy(x => new
+                    {
+                        x.intLote,
+                        x.strProducto
+                    }))
+                {
+                    var key = (
+                        grupo.Key.intLote,
+                        NormalizarAudMatEmp(grupo.Key.strProducto));
+
+                    decimal costoAuditado = grupo
+                        .Where(x => x.blExisteEnFichaActual && x.blIncluidoCosto)
+                        .Sum(x => x.dcCostoItemLibra);
+
+                    dictCabeceraBD.TryGetValue(key, out decimal costoActual);
+                    dictLibras.TryGetValue(key, out decimal libras);
+
+                    decimal diferenciaUnit = costoAuditado - costoActual;
+
+                    var banderas = grupo
+                        .Where(x => !string.IsNullOrWhiteSpace(x.strBandera))
+                        .SelectMany(x => x.strBandera.Split(
+                            '|',
+                            StringSplitOptions.RemoveEmptyEntries))
+                        .Distinct()
+                        .ToList();
+
+                    if (Math.Abs(diferenciaUnit) > 0.0001m)
+                        banderas.Add("ME011");
+
+                    banderas = banderas.Distinct().ToList();
+
+                    string tipoProceso = string.Join(",",
+                        grupo
+                            .Where(x => x.blExisteEnFichaActual)
+                            .Select(x => x.strTipoProceso)
+                            .Where(x => !string.IsNullOrWhiteSpace(x))
+                            .Distinct());
+
+                    if (string.IsNullOrWhiteSpace(tipoProceso))
+                        tipoProceso = "REGISTRO_ANTERIOR";
+
+                    resultado.lstResumen.Add(new AuditoriaMaterialEmpaqueResumenDto
+                    {
+                        intLote = grupo.Key.intLote,
+                        strProducto = grupo.Key.strProducto,
+                        strTipoProceso = tipoProceso,
+                        dcLibras = Math.Round(libras, 2),
+
+                        dcCostoUnitarioActualBD = Math.Round(costoActual, 8),
+                        dcCostoUnitarioAuditado = Math.Round(costoAuditado, 8),
+                        dcDiferenciaUnitario = Math.Round(diferenciaUnit, 8),
+
+                        dcCostoTotalActualBD = Math.Round(costoActual * libras, 2),
+                        dcCostoTotalAuditado = Math.Round(costoAuditado * libras, 2),
+                        dcDiferenciaDolares = Math.Round(diferenciaUnit * libras, 2),
+
+                        intCantidadItems = grupo.Count(x => x.blExisteEnFichaActual),
+                        intCantidadBanderas = banderas.Count,
+                        strBanderas = string.Join("|", banderas),
+                        strEstado = banderas.Any() ? "REVISAR" : "OK"
+                    });
+                }
+
+                // ============================================================
+                // 10. SOLO ERRORES + ORDEN POR IMPACTO
+                // ============================================================
+                if (blSoloErrores)
+                {
+                    var clavesError = resultado.lstResumen
+                        .Where(x => x.strEstado == "REVISAR")
+                        .Select(x => (x.intLote, x.strProducto))
+                        .ToHashSet();
+
+                    resultado.lstResumen = resultado.lstResumen
+                        .Where(x => clavesError.Contains((x.intLote, x.strProducto)))
+                        .ToList();
+
+                    resultado.lstDetalle = resultado.lstDetalle
+                        .Where(x => clavesError.Contains((x.intLote, x.strProducto)))
+                        .ToList();
+                }
+
+                resultado.lstResumen = resultado.lstResumen
+                    .OrderByDescending(x => Math.Abs(x.dcDiferenciaDolares))
+                    .ToList();
+
+                resultado.lstDetalle = resultado.lstDetalle
+                    .OrderBy(x => x.intLote)
+                    .ThenBy(x => x.strProducto)
+                    .ThenByDescending(x => x.dcCostoItemLibra)
+                    .ToList();
+
+                return resultado;
+            }
+            catch (Exception ex)
+            {
+                _objLogger.LogError(
+                    $"[CalculoCostosFeature].[AuditarMaterialEmpaque] Ocurrió un error: {ex.Message}");
+                throw;
+            }
+        }
+
+        #endregion
+
         #region Flujo Mat Prima Reproceso
 
         public async Task<List<MatPrimaReproceso>> ObtenerReporteMateriaPrimaReproValorizada(DateOnly dtFechaInicio, DateOnly dtFechaFin, enmTipoConsulta objEnmTip = enmTipoConsulta.ConFront)
@@ -349,8 +1059,8 @@ namespace CostManagement.Aplicación.Features
             //List<MatPrimaReproceso> lstReproVal;
             List<string> lstItemCod;
             List<PrecioFrsXMov> lstPrecioLiqOtrProc, lstPrecioFrsXMovCam;
-            List<CostoMovArtDto> lstCostPromHidra;
             DataProcesoParam objDataProceso = new();
+            List<ParamRectrac> lstInfoRetrac;
             try
             {
                 int diasEnMes = DateTime.DaysInMonth(dtFechaInicio.Year, dtFechaInicio.Month);
@@ -367,33 +1077,33 @@ namespace CostManagement.Aplicación.Features
                 lstItemCod = MatPrimaReproceso.ObtenerLstItemHidra(objDataProceso.lstLiqRepro);
 
                 var tareaFresco = ObtenerLiquidacionValorizada(dtFechaInicio, dtFechaFin);
-                //var tareaCostPromHidra = _objMateriaPrima.CostoUltMovXItemCod(lstItemCod, dtFechaInicio, dtFechaFin);
+                var tareaRetrac =  _objMateriaPrima.ObtenerInfoRectractiladoXLote(dtFechaInicio, dtFechaFin);
                 var tareaPrecioFrsXMovCam = _objMateriaPrima.ObtenerPrecioFrsSinTallaXMovCam(lstLiqLote);
                 var tareaOtroProc = _objMateriaPrima.ObtenerConsumoMovLiqOtroProc(lstLiqLote);
 
+                var lstCodProd = objDataProceso.lstLiqRepro.Select(x => x.intCodProd.ToString()).Distinct().ToList();
                 await ObtenerValProceso(dtFechaInicio, objDataProceso);
                 var TareaTarifaProceso = _objProcesoParametro.ConsultarProcesoTarifa(dtFechaCorte);
-                await Task.WhenAll(//tareaCostPromHidra,
-                    tareaOtroProc, tareaPrecioFrsXMovCam, tareaFresco,
-                    _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(objDataProceso.lstLiqRepro)
+                var tareaInfoProd = _objMateriaPrima.ObtenerInfoProd(lstCodProd);
+                await Task.WhenAll(
+                    tareaOtroProc, tareaPrecioFrsXMovCam, tareaFresco, tareaRetrac,
+                    _objCostoMaterialEmpaque.ObtenerCostoMaterialEmpaqueXLiqProd(objDataProceso.lstLiqRepro),
+                    tareaInfoProd
                     );
-                //lstCostPromHidra = await tareaCostPromHidra;
+                objDataProceso.lstInfoRetrac = await tareaRetrac;
                 objDataProceso.lstLiqFresco = await tareaFresco;
                 objDataProceso.lstProcesoTarifa = await TareaTarifaProceso;
                 lstPrecioLiqOtrProc = await tareaOtroProc;
                 lstPrecioFrsXMovCam = await tareaPrecioFrsXMovCam;
-                //_objMotorAsigPrec.AsignarCostHidra(lstCostPromHidra, objDataProceso.lstLiqRepro);
+                objDataProceso.lstInfoProd = await tareaInfoProd;
+                _objMotorAsigPrec.AsignarRetractiladoRepro(objDataProceso);
                 _objMotorProceso.AsignarCostosProcesosRepro(objDataProceso);
-                _objMotorAsigPrec.AsignarCostRecibiXFrsMovCam(lstPrecioLiqOtrProc, lstPrecioFrsXMovCam, objDataProceso);
+                _objMotorAsigPrec.AsignarCostRecibiXFrsMovCam(objDataProceso);
                 var lstLiqLoteInv = objDataProceso.lstLiqRepro.Where(lbsRecProc =>
                         lbsRecProc.strAgrupacion == "1. RECIBIDO" && lbsRecProc.dbCostoXSecuencial == 0)
                     .Select(x => x.intLoteOrigen)
                     .Distinct()
                     .ToList();
-                var lstCodProd = objDataProceso.lstLiqRepro
-                .Select(x => x.intCodProd.ToString())
-                .Distinct()
-                .ToList();
 
                 var lstPreciosProm = await _objMateriaPrima.ObtenerMatPrimSaldo(lstCodProd);
                 var lstPrecios = await _objMateriaPrima.ObtenerMatPrimSaldo(lstLiqLoteInv);
@@ -710,6 +1420,7 @@ namespace CostManagement.Aplicación.Features
             DateOnly dtFechaCorteCorr, dtFechaInicio, dtFechaFin;
             MotorProcesoParametro objMotorProceso = new MotorProcesoParametro(_objLogger);
             DataProcesoParam objDataProceso = new DataProcesoParam();
+            List<ParamRectrac> lstInfoRetrac;
             try
             {
                 //Se obtiene tipo de proceso cocido para entero
@@ -717,15 +1428,32 @@ namespace CostManagement.Aplicación.Features
                 dtFechaCorteCorr = DateOnly.FromDateTime(dtFechaCorte);
                 dtFechaInicio = new DateOnly(dtFechaCorte.Year, dtFechaCorte.Month, 1);
                 dtFechaFin = new DateOnly(dtFechaCorte.Year, dtFechaCorte.Month, dtFechaCorte.Day);
-                var tareaRepro = _objMateriaPrima.ReporteReproPlanProc(dtFechaInicio, dtFechaFin);
-                var TareaTarifaProceso = _objProcesoParametro.ConsultarProcesoTarifa(dtFechaCorteCorr);
-                var tareaFresco =  _objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio, dtFechaFin);
-                //await ObtenerValProceso(dtFechaInicio, objDataProceso);
-                await Task.WhenAll(tareaRepro, TareaTarifaProceso, tareaFresco, ObtenerValProceso(dtFechaInicio, objDataProceso));
-                objDataProceso.lstLiqFresco = await tareaFresco;
-                objDataProceso.lstLiqRepro = await tareaRepro;
-                objDataProceso.lstProcesoTarifa = await TareaTarifaProceso;
+                var tareaReproCompleto =_objMateriaPrima.ReporteReproPlanRecibProc( dtFechaInicio,dtFechaFin);
 
+                var TareaTarifaProceso = _objProcesoParametro.ConsultarProcesoTarifa(dtFechaCorteCorr);
+
+                var tareaFresco =_objMateriaPrima.ObtenerMatPrimValFrsXRangoFecha(dtFechaInicio,dtFechaFin);
+
+                await Task.WhenAll(
+                    tareaReproCompleto,
+                    TareaTarifaProceso,
+                    tareaFresco,
+                    ObtenerValProceso(dtFechaInicio, objDataProceso));
+
+                objDataProceso.lstLiqFresco =await tareaFresco;
+                objDataProceso.lstLiqReproCompleto = await tareaReproCompleto;
+                objDataProceso.lstLiqRepro = objDataProceso.lstLiqReproCompleto.Where(x =>
+                string.Equals(  x.strAgrupacion,
+                                "2. PROCESADO",
+                                StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                objDataProceso.lstProcesoTarifa = await TareaTarifaProceso;
+                var lstCodProd = objDataProceso.lstLiqRepro.Select(x => x.intCodProd.ToString()).Distinct().ToList();
+                objDataProceso.lstInfoRetrac = await _objMateriaPrima.ObtenerInfoRectractiladoXLote(dtFechaInicio, dtFechaFin);
+                objDataProceso.lstInfoProd = await _objMateriaPrima.ObtenerInfoProd(lstCodProd);
+
+                _objMotorAsigPrec.AsignarRetractiladoRepro(objDataProceso);
                 //if (lstResultados.Any() && lstResultados.All(r => r.dcValor != 0))
                 //{
                 //    return lstResultados;
@@ -738,9 +1466,10 @@ namespace CostManagement.Aplicación.Features
                 List<string> lstItemCod;
 
                 lstItemCod = MatPrimaReproceso.ObtenerLstItemHidra(objDataProceso.lstLiqRepro);
-                var tareaCostPromHidra = await  _objMateriaPrima.CostoUltMovXItemCod(lstItemCod, dtFechaInicio, dtFechaFin);
-                
-                objDataProceso.dcCostoHidraReproceso= tareaCostPromHidra.Sum(obj => obj.dcConsumoTotal);
+                var tareaCostPromHidra = await _objMateriaPrima.CostoUltMovXItemCod(lstItemCod, dtFechaInicio, dtFechaFin);
+
+                objDataProceso.dcCostoHidraReproceso = tareaCostPromHidra.Sum(obj => obj.dcConsumoTotal);
+                objDataProceso.lstLibrasParticion = new List<LibrasParticionDto>();
                 // Llamada para Fresco
                 objMotorProceso.AsignarCostoProcesoFrs(objDataProceso);
                 // Llamada para Reproceso
@@ -846,8 +1575,116 @@ namespace CostManagement.Aplicación.Features
             }
         }
 
+        public async Task<WarrenResultadoDto> GuardarWarren(GuardarWarrenRequest request)
+        {
+            try
+            {
+                int anio = Convert.ToInt32(request.strAnio);
+                int mes = Convert.ToInt32(request.strMes);
+
+                DateOnly inicio = new(anio, mes, 1);
+                DateOnly fin = new(anio, mes, DateTime.DaysInMonth(anio, mes));
+
+                // ObtenerLiquidacionValorizada deja calculados los componentes y dcCostTotalProc
+                // del PFR sin modificar el costo original con Warren.
+                var tareaPfr = ObtenerLiquidacionValorizada(inicio, fin);
+                var tareaParametros = _objProcesoParametro.ConsultarProcesosFrescoConValores(fin);
+
+                await Task.WhenAll(tareaPfr, tareaParametros);
+
+                var lstPfr = await tareaPfr;
+                var lstParametrosPfr = await tareaParametros;
+
+                WarrenResultadoDto resultado = _objMotorWarren.Calcular(
+                    lstPfr,
+                    lstParametrosPfr,
+                    request.dcObjetivoWarren);
+
+                await _objProcesoParametro.RegistrarParametrosWarren(
+                    fin,
+                    resultado,
+                    request.strUsuario);
+
+                return resultado;
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<CalculoCostosFeature>.Error(
+                    _objLogger,
+                    nameof(CalculoCostosFeature),
+                    nameof(GuardarWarren),
+                    ex);
+                throw;
+            }
+        }
+
         #endregion
 
+        #region Distribucion Costos Electricos
+        public async Task<List<DistribucionCostoDto>> ObtenerDistribucionCostosElectricos(string strAnio, string strMes)
+        {
+            List<DistribucionCostoDto> lstDistribucionCostos;
+            int intAnio, intMes;
+            try
+            {
+                intAnio = Convert.ToInt32(strAnio);
+                intMes = Convert.ToInt32(strMes);
+                lstDistribucionCostos = await _objProcesoParametro.ConsultarDistribucion(intAnio, intMes);
+                return lstDistribucionCostos;
+            }
+            catch (Exception objException)
+            {
+                ManejoLog<CalculoCostosFeature>.Error(_objLogger, nameof(CalculoCostosFeature), nameof(ObtenerDistribucionCostosElectricos), objException);
+                throw;
+            }
+        }
+        public async Task<bool> RegistrarDistribucionCostosElectricos(List<DistribucionCostoDto> objRegistros)
+        {
+            bool blEjecucion = false;
+            try
+            {
+                blEjecucion = await _objProcesoParametro.CrearOActualizarDistribucion(objRegistros);
+                return blEjecucion;
+            }
+            catch (Exception objException)
+            {
+                ManejoLog<CalculoCostosFeature>.Error(_objLogger, nameof(CalculoCostosFeature), nameof(ObtenerDistribucionCostosElectricos), objException);
+                throw;
+            }
+        }
 
+        public async Task<ConsolidadoDTO> GetConsolidadoHaber(int anio)
+        {
+            ConsolidadoDTO objConsolidado;
+            try
+            {
+                // 1. Traer HABEREs de la BD
+                var haber = await _objProcesoParametro.GetHaberesDistribucion(anio);
+
+
+                // 2. Separar por TIPO: ENLEC y REBAS
+                var energiaHaber = haber.Where(h => h.Tipo == "ENLEC").ToList();
+                var basuraHaber = haber.Where(h => h.Tipo == "REBAS").ToList();
+
+
+                // 3. Convertir a ConsolidadoDTO
+                objConsolidado = new ConsolidadoDTO
+                {
+                    Anio = anio,
+                    Usd = HaberDistribucionDTO.ConvertirADiccionarioMeses(energiaHaber, h => h.Monto),
+                    Kwh = HaberDistribucionDTO.ConvertirADiccionarioMeses(energiaHaber, h => h.ValorKw),
+                    Alumbrado = HaberDistribucionDTO.ConvertirADiccionarioMeses(basuraHaber, h => h.Monto)
+                };
+
+                return objConsolidado;
+            }
+            catch (Exception objException)
+            {
+                ManejoLog<CalculoCostosFeature>.Error(_objLogger, nameof(CalculoCostosFeature), nameof(GetConsolidadoHaber), objException);
+                throw;
+            }
+        }
+
+        #endregion
     }
 }

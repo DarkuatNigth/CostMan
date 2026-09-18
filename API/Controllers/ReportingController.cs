@@ -183,6 +183,48 @@ namespace CostManagement.API.Controllers
         }
 
 
+
+        [HttpGet("material-empaque-auditoria")]
+        public async Task<IActionResult> AuditarCostoMaterialEmpaque(
+            DateOnly dtFechaInicio,
+            DateOnly dtFechaFin,
+            string? strProducto = null,
+            int? intLote = null,
+            bool blSoloErrores = false)
+        {
+            try
+            {
+                var resultado = await _objCostoMateriaPrima.AuditarMaterialEmpaque(
+                    dtFechaInicio,
+                    dtFechaFin,
+                    strProducto,
+                    intLote,
+                    blSoloErrores);
+
+                var dtResult = new DataTablesResultDto
+                {
+                    Table = resultado.lstResumen.AListaDeDiccionarios(),
+                    Table1 = resultado.lstDetalle.AListaDeDiccionarios()
+                };
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Auditoría de material de empaque ejecutada correctamente",
+                    objData = dtResult
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error en auditoría de material de empaque: " + ex.Message,
+                    objData = ""
+                });
+            }
+        }
+
         [HttpGet("materia-prima-repro")]
         public async Task<IActionResult> ObtenerCostoMateriaPrimaRepro(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {

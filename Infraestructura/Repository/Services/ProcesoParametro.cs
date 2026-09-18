@@ -6,26 +6,33 @@ using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Repository.Interface;
 using CostManagement.Infraestructura.Utils;
 using CostManagementService.Infraestructura.EF_Core;
+using DocumentFormat.OpenXml.InkML;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Collections.Generic;
 using System.Data;
 
 namespace CostManagement.Infraestructura.Repository.Services
 {
     public class ProcesoParametro : IProcesoParametro
     {
-        private readonly IDbContextFactory<CostosDbContext> _objContextFactory;
+        private readonly IDbContextFactory<CostManagementDbContext> _objContextFactory;
+        private readonly IDbContextFactory<CostosDbContext> _objCostosFactory;
+        private readonly IDbContextFactory<SongDbContext> _objSongFactory;
         private readonly ILogger<ProcesoParametro> _objLogger;
         private readonly IOptions<ParametrosConfig> _objConfig;
 
         public ProcesoParametro(
             ILogger<ProcesoParametro> objLogger,
             IOptions<ParametrosConfig> objConfig,
-            IDbContextFactory<CostosDbContext> objContextFactory)
+            IDbContextFactory<CostManagementDbContext> objContextFactory,
+            IDbContextFactory<CostosDbContext> objCostosFactory,
+            IDbContextFactory<SongDbContext> objSongFactory)
         {
             _objLogger = objLogger;
             _objConfig = objConfig;
-            _objContextFactory = objContextFactory;
+            _objCostosFactory = objCostosFactory;
+            _objSongFactory = objSongFactory;
         }
 
         public async Task<List<ProcesoResultadoDto>> ConsultarProcesosFrescoConValores(DateOnly fechaCorte)
@@ -36,7 +43,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                     { "IQF", "BRINE", "Hidratacion", "Cocido", "Pelado", "Decorado" };
 
                 return await ManejoContext<CostosDbContext>.EjecutarEnTransaccionAsync(
-                    _objContextFactory,
+                    _objCostosFactory,
                     async objContext =>
                     {
                         return await (
@@ -75,7 +82,7 @@ namespace CostManagement.Infraestructura.Repository.Services
             try
             {
                 return await ManejoContext<CostosDbContext>.EjecutarEnTransaccionAsync(
-                    _objContextFactory,
+                    _objCostosFactory,
                     async objContext =>
                     {
                         return await (
@@ -114,13 +121,19 @@ namespace CostManagement.Infraestructura.Repository.Services
             try
             {
                 return await ManejoContext<CostosDbContext>.EjecutarEnTransaccionAsync(
-                    _objContextFactory,
+                    _objCostosFactory,
                     async objContext =>
                     {
                         var idsProcesos = objParam.LstValores.Select(d => (byte)d.intCodigo).ToList();
 
+                        var tiposEntrada = objParam.LstValores
+                            .Where(x => !string.IsNullOrWhiteSpace(x.strTipoLote))
+                            .Select(x => x.strTipoLote!.Trim())
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
                         var registrosAEliminar = objContext.TbParametroCosteo
-                            .Where(p => p.PcFecha == fechaCorte && idsProcesos.Contains(p.PcPrId));
+                            .Where(p => p.PcFecha == fechaCorte && idsProcesos.Contains(p.PcPrId) && tiposEntrada.Contains(p.PcTipoLote));
 
                         objContext.TbParametroCosteo.RemoveRange(registrosAEliminar);
                         await objContext.SaveChangesAsync();
@@ -155,7 +168,7 @@ namespace CostManagement.Infraestructura.Repository.Services
             try
             {
                 return await ManejoContext<CostosDbContext>.EjecutarAsync(
-                    _objContextFactory,
+                    _objCostosFactory,
                     async objContext =>
                     {
                         return await (
@@ -193,7 +206,7 @@ namespace CostManagement.Infraestructura.Repository.Services
             try
             {
                 return await ManejoContext<CostosDbContext>.EjecutarAsync(
-                    _objContextFactory,
+                    _objCostosFactory,
                     async objContext =>
                     {
                         return await (
@@ -216,7 +229,7 @@ namespace CostManagement.Infraestructura.Repository.Services
             try
             {
                 return await ManejoContext<CostosDbContext>.EjecutarAsync(
-                    _objContextFactory,
+                    _objCostosFactory,
                     async objContext =>
                     {
                         return await (
@@ -233,5 +246,319 @@ namespace CostManagement.Infraestructura.Repository.Services
                 throw;
             }
         }
+
+        public async Task<List<DistribucionCostoDto>> ConsultarDistribucion(int anio, int mes)
+        {
+            List<DistribucionCostoDto> lstDistribucion = new List<DistribucionCostoDto>();
+            List<TbMaecta> lstMaecCuentas, lstCentroCosto ;
+            List<TbPlantaProcOe> lstPlantaProc = new List<TbPlantaProcOe>();
+            List<string> lstCodCuentas, lstCodBodega, lstCodCentroCosto;
+            Dictionary<int,string> dicPlantaProc = new Dictionary<int, string>() { { 1, "SONGA1" }, { 11, "SONGA2" }, { 12, "COMIN" } };
+            try
+            {
+                lstDistribucion = await ManejoContext<CostosDbContext>.EjecutarAsync(
+                    _objCostosFactory,
+                    async objContext =>
+                    {
+                        return await (
+                            from d in objContext.TbDistribucionCosto.AsNoTracking()
+                            where d.DpEstado == "AC"
+                               && d.DpAnio == anio
+                               && d.DpMes == mes
+                            orderby d.DpPaCodigo, d.DpCtaNatura descending, d.DpCtaNumero
+                            select new DistribucionCostoDto(d)).ToListAsync();
+                    });
+                lstCodCuentas = lstDistribucion.Select(d => d.strCtaNumero).Distinct().ToList();
+                lstCodBodega = lstDistribucion.Select(d => d.intPaCodigo.ToString()).Distinct().ToList();
+                lstMaecCuentas = await ManejoContext<SongDbContext>.EjecutarAsync(
+                                    _objSongFactory,
+                                    async objContext =>
+                                    {
+                                        return await objContext.TbMaecta.AsNoTracking()
+                                            .SelectManyBatchAsync(
+                                                keySelector: c => c.CtaNumero,
+                                                values: lstCodCuentas,
+                                                selector: filtered =>
+                                                        from c in filtered
+                                                        select c
+                                            );
+                                    });
+                //lstPlantaProc = await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                //                    _objContextFactory,
+                //                    async objContext =>
+                //                    {
+                //                        return await objContext.TbPlantaProcOe.AsNoTracking().ToListAsync();
+                //                    });
+                //lstPlantaProc = lstPlantaProc.Where(c => lstCodBodega.Contains(c.PaCodigo)).ToList();
+                lstCodCentroCosto = lstMaecCuentas.Select(c => c.CtaRelaci!).Distinct().ToList();
+                lstCentroCosto = await ManejoContext<SongDbContext>.EjecutarAsync(
+                                    _objSongFactory,
+                                    async objContext =>
+                                    {
+                                        return await objContext.TbMaecta.AsNoTracking()
+                                            .SelectManyBatchAsync(
+                                                keySelector: c => c.CtaNumero,
+                                                values: lstCodCentroCosto,
+                                                selector: filtered =>
+                                                        from c in filtered
+                                                        select c
+                                            );
+                                    });
+                Dictionary<string, TbMaecta> dictMaecCuentas = lstMaecCuentas.ToDictionary(c => c.CtaNumero.Trim());
+                Dictionary<string, TbMaecta> dictCentroCosto = lstCentroCosto.ToDictionary(c => c.CtaNumero.Trim());
+                //Dictionary<int, TbPlantaProcOe> dictPlantaProc = lstPlantaProc.ToDictionary(c => Convert.ToInt32(c.PaCodigo));
+                foreach (var obj in lstDistribucion)
+                {
+                    TbMaecta? objCuenta = dictMaecCuentas!.GetValueOrDefault(obj.strCtaNumero, null);
+                    //TbPlantaProcOe? objPlanta = dictPlantaProc!.GetValueOrDefault(obj.intPaCodigo ?? 0, null);
+                    if (objCuenta != null)
+                    {
+                        string strCentroCosto = dictCentroCosto!.GetValueOrDefault(objCuenta.CtaRelaci!.Trim(), null)?.CtaDeslar ?? string.Empty;
+                        obj.InicializarMaectCuenta(objCuenta, strCentroCosto);
+                    }
+                    //if (objPlanta != null)
+                    //{
+                    //    obj.InicializarPlanta(objPlanta.PaDescri!);
+                    //}
+                    obj.InicializarPlanta(dicPlantaProc!.GetValueOrDefault(obj.intPaCodigo, ""));
+                }
+                return lstDistribucion;
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<ProcesoParametro>.Error(_objLogger, nameof(ProcesoParametro), nameof(ConsultarDistribucion), ex);
+                throw;
+            }
+        }
+        public async Task<bool> CrearOActualizarDistribucion(List<DistribucionCostoDto> objRegistros)
+        {
+            bool blEjecuto = false;
+            try
+            {
+                blEjecuto = await ManejoContext<CostosDbContext>.EjecutarEnTransaccionAsync(
+                    _objCostosFactory,
+                    async objContext =>
+                    {
+                        foreach (var obj in objRegistros)
+                        {
+                            if (obj.strCtaNatura == "C")
+                            {
+                                _objLogger.LogInformation($"Registros Cuenta Haber: {obj}");
+                            }
+                            var registroExistente = await objContext.TbDistribucionCosto.AsTracking()
+                                .FirstOrDefaultAsync(d => d.DpId == obj.intCodigo);
+                            if (registroExistente != null)
+                            {
+                                registroExistente.DpPorcentaje = obj.dcPorcentaje;
+                                registroExistente.DpMonto = obj.dcMonto;
+                                registroExistente.DpValorKw = obj.dcValorKw;
+                                registroExistente.DpUsuarioMod = obj.strUsuario;
+                                registroExistente.DpFechaMod = DateTime.Now;
+                            }
+                            else
+                            {
+                                var nuevoRegistro = new TbDistribucionCosto
+                                {
+                                    DpTipo = obj.strTipo,
+                                    DpFechaCorte = obj.dtFechaCorte,
+                                    DpAnio = (short)obj.intAnio,
+                                    DpMes = (short)obj.intMes,
+                                    DpPorcentaje = obj.dcPorcentaje,
+                                    DpMonto = obj.dcMonto,
+                                    DpValorKw = obj.dcValorKw,
+                                    DpCtaNumero = obj.strCtaNumero,
+                                    DpCtaNatura = obj.strCtaNatura,
+                                    DpCodigoMedidor = obj.strCodMedidor,
+                                    DpPaCodigo = (byte)obj.intPaCodigo,
+                                    DpEstado = "AC",
+                                    DpUsuarioCrea = obj.strUsuario,
+                                    DpFechaCrea = DateTime.Now
+                                };
+                                await objContext.TbDistribucionCosto.AddAsync(nuevoRegistro);
+                            }
+                        }
+                        int filasAfectadas = await objContext.SaveChangesAsync();
+                        // Si filasAfectadas == 0, EF Core no generó sentencias SQL (sigue sin rastrear)
+                        _objLogger.LogInformation($"Registros impactados en Base de Datos: {filasAfectadas}");
+
+                        return filasAfectadas > 0;
+                    }, intTimeout: 180,
+    nivelAislamiento: null,
+    blRequiereCommit: true // Explicitamente indicado
+                           );
+                return blEjecuto;
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<ProcesoParametro>.Error(_objLogger, nameof(ProcesoParametro), nameof(ConsultarDistribucion), ex);
+                throw;
+            }
+        }
+
+        public async Task<List<HaberDistribucionDTO>> GetHaberesDistribucion(int anio)
+        {
+            List<HaberDistribucionDTO> lstDistiDto;
+            try
+            {
+                var lstDto = await ManejoContext<CostosDbContext>.EjecutarAsync(
+                   _objCostosFactory,
+                   async objContext =>
+                   {
+                       return await objContext.TbDistribucionCosto
+                                .AsNoTracking()  
+                                .Where(d => d.DpAnio == anio
+                                         && d.DpCtaNatura == "D"      
+                                         && d.DpEstado == "AC")
+                                .Select(d => new HaberDistribucionDTO(d))
+                                .ToListAsync();
+                   });
+
+                lstDistiDto = lstDto
+                        .GroupBy(d => new { d.Tipo, d.Bolsa, d.Mes })
+                        .Select(g => new HaberDistribucionDTO
+                        {
+                            Tipo = g.Key.Tipo,
+                            Bolsa = g.Key.Bolsa,
+                            Mes = g.Key.Mes,
+                            Monto = g.Sum(x => x.Monto),    // ← SUMA
+                            ValorKw = g.Sum(x => x.ValorKw)
+                        })
+                        .ToList();
+
+                return lstDistiDto;
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<ProcesoParametro>.Error(_objLogger, nameof(ProcesoParametro), nameof(ConsultarDistribucion), ex);
+                throw;
+            }
+        }
+
+
+        public async Task<List<ProcesoResultadoDto>> ConsultarParametrosWarren(DateOnly fechaCorte)
+        {
+            try
+            {
+                return await ManejoContext<CostosDbContext>.EjecutarAsync(
+                    _objCostosFactory,
+                    async objContext =>
+                    {
+                        var tiposWarren = new[] { "WEN", "WSH" };
+
+                        return await (
+                            from parametro in objContext.TbParametroCosteo.AsNoTracking()
+                            join proceso in objContext.TbProcesoCosteo.AsNoTracking()
+                                on parametro.PcPrId equals proceso.PrId
+                            where parametro.PcFecha == fechaCorte
+                               && tiposWarren.Contains(parametro.PcTipoLote)
+                               && proceso.PrEstado == "AC"
+                            select new ProcesoResultadoDto
+                            {
+                                intCodigo = proceso.PrId,
+                                intCodDet = parametro.PcId,
+                                strEstado = parametro.PcEstado,
+                                strDescripcion = proceso.PrDescri,
+                                strCodTip = proceso.PrTipCodigo,
+                                blEditable = proceso.PrEditable ?? false,
+                                strTipoLote = parametro.PcTipoLote,
+                                dcValor = parametro.PcMonto,
+                                dcLibras = parametro.PcLibras,
+                                dcCostUnitario = parametro.PcCotoUnitario
+                            }
+                        ).ToListAsync();
+                    });
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<ProcesoParametro>.Error(
+                    _objLogger,
+                    nameof(ProcesoParametro),
+                    nameof(ConsultarParametrosWarren),
+                    ex);
+                throw;
+            }
+        }
+
+        public async Task<bool> RegistrarParametrosWarren(
+            DateOnly fechaCorte,
+            WarrenResultadoDto objWarren,
+            string strUsuario)
+        {
+            try
+            {
+                if (objWarren == null || objWarren.lstDetalle == null || !objWarren.lstDetalle.Any())
+                    throw new ArgumentException("No existe detalle Warren para registrar.");
+
+                return await ManejoContext<CostosDbContext>.EjecutarEnTransaccionAsync(
+                    _objCostosFactory,
+                    async objContext =>
+                    {
+                        var ids = objWarren.lstDetalle
+                            .Where(x => x.intCodigo > 0)
+                            .Select(x => (byte)x.intCodigo)
+                            .Distinct()
+                            .ToList();
+
+                        // IMPORTANTE: borrar únicamente Warren. No tocar PFR/RPC.
+                        var anteriores = objContext.TbParametroCosteo
+                            .Where(x => x.PcFecha == fechaCorte
+                                     && ids.Contains(x.PcPrId)
+                                     && (x.PcTipoLote == "WEN" || x.PcTipoLote == "WSH"));
+
+                        objContext.TbParametroCosteo.RemoveRange(anteriores);
+                        await objContext.SaveChangesAsync();
+
+                        var usuario = string.IsNullOrWhiteSpace(strUsuario) ? "SISTEMA" : strUsuario.Trim();
+                        var equipo = Environment.MachineName;
+                        var fecha = DateTime.Now;
+                        var nuevos = new List<TbParametroCosteo>();
+
+                        foreach (var d in objWarren.lstDetalle.Where(x => x.intCodigo > 0))
+                        {
+                            nuevos.Add(new TbParametroCosteo
+                            {
+                                PcPrId = (byte)d.intCodigo,
+                                PcFecha = fechaCorte,
+                                PcTipoLote = "WEN",
+                                PcLibras = Math.Round(d.dcLibrasEntero, 5),
+                                PcCotoUnitario = Math.Round(d.dcCostoUnitarioEnteroWarren, 5),
+                                PcMonto = Math.Round(d.dcMontoEnteroWarren, 5),
+                                PcEstado = "CE",
+                                PcUsuarioCrea = usuario,
+                                PcFechaCrea = fecha,
+                                PcEquipoCrea = equipo
+                            });
+
+                            nuevos.Add(new TbParametroCosteo
+                            {
+                                PcPrId = (byte)d.intCodigo,
+                                PcFecha = fechaCorte,
+                                PcTipoLote = "WSH",
+                                PcLibras = Math.Round(d.dcLibrasCola, 5),
+                                PcCotoUnitario = Math.Round(d.dcCostoUnitarioColaWarren, 5),
+                                PcMonto = Math.Round(d.dcMontoColaWarren, 5),
+                                PcEstado = "CE",
+                                PcUsuarioCrea = usuario,
+                                PcFechaCrea = fecha,
+                                PcEquipoCrea = equipo
+                            });
+                        }
+
+                        await objContext.TbParametroCosteo.AddRangeAsync(nuevos);
+                        await objContext.SaveChangesAsync();
+                        return true;
+                    });
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<ProcesoParametro>.Error(
+                    _objLogger,
+                    nameof(ProcesoParametro),
+                    nameof(RegistrarParametrosWarren),
+                    ex);
+                throw;
+            }
+        }
+
     }
 }

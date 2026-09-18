@@ -1,7 +1,9 @@
 ﻿using CostManagement.Aplicación.DTos;
 using CostManagement.Dominio.Entidades;
 using CostManagementService.Aplicacion.DTos;
+using CostManagementService.Dominio.Entidades;
 using CostManagementService.Infraestructura.EF_Core.SONG;
+using Newtonsoft.Json;
 using System.Collections.Concurrent;
 
 namespace CostManagement.Dominio.Reglas
@@ -34,43 +36,120 @@ namespace CostManagement.Dominio.Reglas
             _objLogger = logger;
         }
         public void AsignarCostRecibiXFrsMovCam(
-            List<PrecioFrsXMov> lstPrecioLiqOtrProc,
-            List<PrecioFrsXMov> lstPrecioFrsXMovCam,
             DataProcesoParam objDataProceso)
         {
 
             if (objDataProceso.lstLiqRepro == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqRepro));
-            if (lstPrecioLiqOtrProc == null) throw new ArgumentNullException(nameof(lstPrecioLiqOtrProc));
-            if (lstPrecioFrsXMovCam == null) throw new ArgumentNullException(nameof(lstPrecioFrsXMovCam));
             if (objDataProceso.lstLiqFresco == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqFresco));
             // Lógica de diccionarios
             var dictCostoProdXTalla = LiquidacionResultado.GenerarDiccionarioCostoXTalla(objDataProceso.lstLiqFresco);
-            //var dictLiqOtrCostoProdXTalla = PrecioFrsXMov.GenerarDiccionarioCostoXTalla(lstPrecioLiqOtrProc);
-            //var dictLiqMovCamCostoProdXTalla = PrecioFrsXMov.GenerarDiccionarioCostoXTalla(lstPrecioFrsXMovCam);
 
             var lstMatPrimaRpcFilt = MatPrimaReproceso.GenerarLstFiltRec(objDataProceso.lstLiqRepro);
             foreach (var liq in lstMatPrimaRpcFilt)
             {
-                var keyBuscada = (liq.intLoteOrigen, liq.intCodProd, liq.intCodTal);
+                var keyBuscada = new LoteFrsKey(liq.intLoteOrigen, liq.intCodProd, liq.intCodTal);
                 var strNivel = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(liq.strTipCod));
 
                 // Aplicar jerarquía de precios
                 if (dictCostoProdXTalla.TryGetValue(keyBuscada, out var precioPromedio))
                 {
+                    LiquidacionResultado objLiq = objDataProceso.lstLiqFresco.Where(x => x.objLotkey == keyBuscada).FirstOrDefault()!;
                     AsignarPrecio(liq, (decimal)precioPromedio, NIVEL_DEFECTO);
                 }
-                //else if (dictLiqOtrCostoProdXTalla.TryGetValue(keyBuscada, out var precioOtroProc))
-                //{
-                //    AsignarPrecio(liq, (decimal)precioOtroProc, strNivel);
-                //}
-                //else if (dictLiqMovCamCostoProdXTalla.TryGetValue(keyBuscada, out var precioMovCam))
-                //{
-                //    AsignarPrecio(liq, (decimal)precioMovCam, strNivel);
-                //}
                 else
                 {
                     liq.strNivel = strNivel; // Asignar nivel aunque no haya precio
                 }
+            }
+        }
+
+        public void AsignarRetractiladoRepro(DataProcesoParam objDataProceso)
+        {
+            List<string> lstProcExclui = new List<string> { "CAM" };
+            try
+            {
+                if (objDataProceso.lstLiqRepro == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqRepro));
+                if (objDataProceso.lstLiqFresco == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqFresco));
+                // PASO 1: Total retractilado de base por PRODUCTO+TALLA (todos los lotes juntos)
+                var dictRetraTotalPT = objDataProceso.lstInfoRetrac
+                    .GroupBy(r => new LoteRpcKeyXProdTal(r.intCodProd, r.intCodTal))
+                    .ToDictionary(g => g.Key, g => g.Sum(x => x.dcLibrasRetra));
+                var debugBase5690 = objDataProceso.lstInfoRetrac
+                .Where(x => x.intCodProd == 5690)
+                .Select(x => new
+                {
+                    x.intLote,
+                    x.intCodProd,
+                    x.intCodTal,
+                    x.dcLibrasRetra
+                })
+                .ToList();
+
+                 _objLogger.LogWarning(
+                                "RETRACTILADO BASE 5690 => {Data}",
+                                JsonConvert.SerializeObject(debugBase5690)
+                            );
+
+                // PASO 2 (fuente resta): lo que fresco ya asigno, por PRODUCTO+TALLA
+                var dictRetraFrescoPT = objDataProceso.lstLiqFresco
+                    .Where(x => x.blRetractilado)
+                    .GroupBy(x => x.objProdTal)
+                    .ToDictionary(g => g.Key, g => g.Sum(x => x.dcLibrasRetractilado ?? 0));
+
+                var lstProcesado = objDataProceso.lstLiqRepro
+                    .Where(x => x.strAgrupacion == "2. PROCESADO"
+                             && !lstProcExclui.Contains(x.strTipCod))
+                    .ToList();
+
+                // PASO 3 (denominador): Σ libras PROCESADO por PRODUCTO+TALLA
+                var dictDenomPT = lstProcesado
+                    .GroupBy(x => x.objProdTalKey)
+                    .ToDictionary(g => g.Key, g => g.Sum(x => (decimal)x.dbLibras));
+                foreach (var liq in lstProcesado)
+                {
+                    if (liq.blRetractilado == true)
+                    {
+                        liq.dcLibrasRetractilado = (decimal)liq.dbLibras;
+                    }
+                    else
+                    {
+                        var keyPT = liq.objProdTalKey;
+
+                        // No existe retractilado base para este producto+talla.
+                        if (!dictRetraTotalPT.TryGetValue(keyPT, out decimal dcTotalBase))
+                            continue;
+
+                        // Lo que ya absorbió fresco.
+                        decimal dcYaFresco = dictRetraFrescoPT.TryGetValue(keyPT, out decimal fresco) ? fresco : 0m;
+
+                        // Lo que realmente queda para reproceso.
+                        decimal dcRemanente = dcTotalBase - dcYaFresco;
+
+                        if (dcRemanente <= 0m) continue;
+
+                        // Total de libras PROCESADO que pueden absorber
+                        // ese remanente.
+                        if (!dictDenomPT.TryGetValue(keyPT, out decimal dcLibrasPT))
+                            continue;
+
+                        if (dcLibrasPT <= 0m)
+                            continue;
+
+                        decimal dcPorcentaje = (decimal)liq.dbLibras / dcLibrasPT;
+
+                        decimal dcRetraCalc = Math.Round(dcPorcentaje * dcRemanente, 2);
+
+                        // Cap físico.
+                        liq.dcLibrasRetractilado = Math.Min(dcRetraCalc, (decimal)liq.dbLibras);
+
+                        liq.blRetractilado = (liq.dcLibrasRetractilado ?? 0m) > 0m;
+                    }
+                }
+            }
+            catch(Exception ex)
+            {
+                _objLogger.LogError(ex, "Error en AsignarRetractiladoRepro");
+                throw;
             }
         }
 
@@ -108,16 +187,8 @@ namespace CostManagement.Dominio.Reglas
                 {
                     AsignarPrecio(objLiq, objPrecioLote.Average(), strNivel);
                 }
-                var objPrecioProm = lstPreciosProm[keyPreProm];
-                //if (objPrecioProm.Any() && objLiq.dbCostoXSecuencial == 0)
-                //{
-                //    AsignarPrecio(objLiq, objPrecioProm.Average(), strNivel);
-                //}
-                //else
-                //{
-                    // No se encontró precio, asignar nivel aunque no haya precio
-                    objLiq.strNivel = strNivel;
-                //}
+                // No se encontró precio, asignar nivel aunque no haya precio
+                objLiq.strNivel = strNivel;
             }
         }
 

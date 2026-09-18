@@ -1,5 +1,7 @@
 ﻿using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
+using CostManagementService.Aplicacion.DTos;
+using CostManagementService.Dominio.Entidades;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -108,7 +110,13 @@ namespace CostManagement.Aplicación.DTos
         #endregion
 
         #region Datos Reprocesos
+        public List<InfoProd> lstInfoProd { get; set; } 
+        #endregion
+
+        #region Datos Reprocesos
         public List<MatPrimaReproceso> lstLiqRepro  { get; set; }
+
+        public List<MatPrimaReproceso> lstLiqReproCompleto { get; set; } = new();
 
         public decimal dcCostoHidraReproceso { get; set; }
         #endregion
@@ -126,6 +134,9 @@ namespace CostManagement.Aplicación.DTos
         public List<CopackingLbs> lstCopackingLbs { get; set; }
         public List<ProcesoResultadoDto> lstResultados { get; set; }
         public List<int> lstLotesFrsRpc { get; set; }
+
+        public List<LibrasParticionDto> lstLibrasParticion { get; set; }
+        public List<ParamRectrac> lstInfoRetrac { get; set; }
 
         #endregion
         #region Parametros Generales

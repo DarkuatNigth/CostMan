@@ -131,24 +131,54 @@ namespace CostManagement.Dominio.Entidades
         IF OBJECT_ID('tempdb..#tmpPelado') IS NOT NULL 
             DROP TABLE #tmpPelado;
         
-        SELECT 
-            lot_numero  as lotNumero,
-            lot_rloNumero as rloNumero,
-	        (SELECT   SUM(PESO)   
-	        FROM dbo.tb_cabtrans A  
-	        INNER JOIN TB_DETRANS B ON A.NSECUENCIAL = B.Nsecuencial AND A.ID_780 = B.id_780  
-	        WHERE fecha>= DATEADD(DAY,-7,@feini)  and   LOTE= lot_rlonumero AND A.tra_secuencial= lot_numero     
-	        AND A.Tro_codigo='15' AND B.pro_codcor<> '3473') as  Peso  
-	    INTO #tmpPelado 
-	    FROM dbo.tb_lototr  
-	    INNER JOIN dbo.tb_tiplot ON lot_tiplot= tip_codigo  
-	    left JOIN tb_produc PR ON pro_codcor= lot_prodPed  
-	    LEFT JOIN TB_PROCES PP ON PP.pro_codigo= PRO_cLAS06 --AND PP.pro_pelado='S'  
-	    WHERE lot_tipo='va' 
-	        AND CONVERT(VARCHAR,lot_fecha,111) BETWEEN CONVERT(VARCHAR,@feini,111) and CONVERT(VARCHAR,@feifin  ,111)     
-	        AND lot_brutas>0  and lot_estado <> 'AN'  
-        group by lot_numero ,
-        lot_rloNumero;
+               WITH CTE_Transacciones AS (
+                SELECT 
+                    LOTE,
+                    A.tra_secuencial,
+                    SUM(B.PESO) AS Peso,
+                    MAX(B.det_codpes) AS CodMaq
+                FROM dbo.tb_cabtrans A  
+                INNER JOIN dbo.TB_DETRANS B 
+                    ON A.NSECUENCIAL = B.Nsecuencial 
+                   AND A.ID_780 = B.id_780  
+                WHERE A.fecha >= DATEADD(DAY, -7, @feini)  
+                  AND A.Tro_codigo = '15' 
+                  AND B.pro_codcor <> '3473'
+                GROUP BY LOTE, A.tra_secuencial
+            )
+            -- 2. Consulta principal con sintaxis corregida
+            SELECT 
+                L.lot_numero    AS lotNumero,
+                L.lot_rloNumero AS rloNumero,
+                T.Peso AS Peso,
+                T.CodMaq AS CodMaqPelado,
+                clas.cla_descripcion AS MaquinaPelado
+            ,CASE WHEN L.lot_esmaquina= 1 THEN 'PA' ELSE  'PM' END AS [TipPelado]
+            INTO #tmpPelado
+            FROM dbo.tb_lototr L
+            INNER JOIN dbo.tb_tiplot 
+                ON L.lot_tiplot = tip_codigo  
+            LEFT JOIN CTE_Transacciones T 
+                ON T.LOTE = L.lot_rloNumero 
+               AND T.tra_secuencial = L.lot_numero
+            LEFT JOIN dbo.tb_Clasificadora clas 
+                ON clas.cla_abrev = T.CodMaq
+            LEFT JOIN dbo.tb_produc PR 
+                ON PR.pro_codcor = L.lot_prodPed  
+            LEFT JOIN dbo.TB_PROCES PP 
+                ON PP.pro_codigo = PR.PRO_cLAS06  
+            WHERE L.lot_tipo = 'va' 
+              AND L.lot_fecha >= CAST(@feini AS DATETIME) 
+              AND L.lot_fecha < DATEADD(DAY, 1, CAST(@feifin AS DATETIME))
+              AND L.lot_brutas > 0  
+              AND L.lot_estado <> 'AN'  
+            GROUP BY 
+                L.lot_numero,
+                L.lot_rloNumero,
+                T.Peso,
+                T.CodMaq,
+                L.lot_esmaquina,
+                clas.cla_descripcion;
 
 
         delete from #tmpPelado where Peso is null;
@@ -228,6 +258,9 @@ namespace CostManagement.Dominio.Entidades
             )
         , 2)
          END AS [Peso]
+    ,peso.CodMaqPelado                                                   AS [CodMaquinaPelado]
+    ,peso.MaquinaPelado                                                  AS [MaquinaPelado]
+    ,peso.TipPelado                                                      AS [TipoPelado]
     --,MAX(COALESCE(retra.LbsCajasRetra, 0.0))                            AS [LbsCajasRetra]
     ,lot.lot_fecha                                                       AS [lot_fecha]
     ,litv.lid_produc                                                     AS [rld_prodcod]
@@ -265,6 +298,7 @@ namespace CostManagement.Dominio.Entidades
     ,CASE  WHEN MAX(CASE 
                 WHEN (lot.lot_tipo   = 'RE' AND lot.lot_tiplot = 'DE')
                   OR (lot.lot_tiplot = 'RLL' AND pro.pro_clas03 = 'PT')
+                  OR (lot.lot_tiplot = 'EPP' AND pro.pro_clas03 = 'PT' AND pro.pro_decora > 1)
                 THEN 1 ELSE 0 
              END) = 1 
     THEN CAST(1 AS bit) ELSE CAST(0 AS bit) 
@@ -275,6 +309,15 @@ namespace CostManagement.Dominio.Entidades
      END                                                                 AS [Retractilado]*/
     ,ROUND(COALESCE(SUM(litv.lid_canenv / emb.emb_cantid), 0.0), 2)     AS [CantCajas]
     ,MAX(bod.bod_codigo)                                                 AS [BodCodigo]
+    ,CASE 
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0 AND  med.med_codigo = 3 and (emb.emb_peso / med.med_kilo) > 4 then 'PANERA' 
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0 AND  med.med_codigo = 1 and (emb.emb_peso * med.med_kilo) > 4 then 'PANERA'
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0 AND  med.med_codigo = 3 and (emb.emb_peso / med.med_kilo) < 4 then 'FONDO' 
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0 AND  med.med_codigo = 1 and (emb.emb_peso * med.med_kilo) < 4 then 'FONDO'
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0  AND med.med_codigo = 2 and emb.emb_peso > 4 then 'PANERA' 
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0  AND med.med_codigo = 2 and emb.emb_peso < 4 then 'FONDO'
+    ELSE NULL                                                          END AS [TIPO EMBAL]
+    ,MAX(bod.bod_descri)                                                 AS [BodDescri]
     ,MAX(emb.emb_codigo)                                                 AS [EmbCodigo]
     ,MAX(CAST(med.med_codigo AS int))                                    AS [MedCodigo]
     ,CAST(MAX(CAST(bod.bod_esBrine AS tinyint)) AS bit)                                 AS [BodEsBrine]
@@ -287,6 +330,8 @@ namespace CostManagement.Dominio.Entidades
     ,MAX(pro.pro_congela)                                                AS [ProCongela]
     ,MAX(COALESCE(prem.CertificadosConcat, '')) AS [Certificado]
     ,MAX(prem.TotalPremio) AS [LidPremio]
+    ,litv.lid_clasificadora                                              AS [lid_clasificadora]
+    ,isnull(clas.cla_descripcion, '')                                                      AS [Clasificadora]
 
 FROM tb_lototr lot WITH(NOLOCK)    
 INNER JOIN tb_liqvag liq WITH(NOLOCK) 
@@ -400,9 +445,10 @@ LEFT JOIN (
     ON  litv.lid_lote   = CAST(prem.lip_noliqu AS bigint)
     AND litv.lid_codtal = prem.lid_talla
     AND litv.lid_produc = prem.lid_producto
+LEFT JOIN dbo.tb_Clasificadora clas
+         ON litv.lid_clasificadora = clas.cla_abrev
 
-WHERE lot.lot_fecha BETWEEN @feini  
-                        AND @feifin
+WHERE CONVERT(char(10), lot.lot_fecha, 111) BETWEEN CONVERT(VARCHAR,@feini,111) and CONVERT(VARCHAR,@feifin  ,111)   
   AND lot.lot_estado <> 'AN'     
   AND liq.liq_estado = 'AC'
 
@@ -410,8 +456,9 @@ GROUP BY
      tp.tip_codigo, tp.tip_descri, lot.lot_tipo, lot.lot_copack
     ,tpc.Descripcion, lot.lot_numero, lot.lot_rloNumero
     ,lot.lot_recibi, lot.lot_proces, lot.lot_fecha
-    ,litv.lid_produc, litv.lid_codtal
-    ,pro.pro_desesp, tal.tal_descri, planta.pa_descri, detpres.dpr_descri
+    ,litv.lid_produc, litv.lid_codtal,peso.CodMaqPelado ,peso.MaquinaPelado, peso.TipPelado,  peso.Peso
+    ,pro.pro_desesp, tal.tal_descri, planta.pa_descri, detpres.dpr_descri,bod.bod_descri
+    ,clas.cla_descripcion,litv.lid_clasificadora  ,emb.emb_peso, med.med_kilo,med.med_codigo
     ,CASE 
         WHEN pro.pro_clas01 = 'CC' AND pro.pro_clas05 = 'EN' THEN 'ENTERO'    
         WHEN pro.pro_clas01 = 'SC' AND pro.pro_clas05 = 'SH' THEN 'COLA'    
@@ -562,5 +609,25 @@ WHERE (pd.pro_codcor IN ('5371') and a.tal_descri LIKE '%51/60%' ) OR (pd.pro_co
 
 
 ";
+
+
+        public string strRetractilado { get; set; } = @" 
+        
+            set dateformat ymd;
+
+          SELECT 
+                 cast(dret.cod_prod as int)                 AS CodProd
+                ,cast(dret.lote as int)                     AS Lote
+                ,cast(dret.cod_tal  as int)                 AS CodTal
+                ,SUM(CAST(COALESCE(dret.cajas_retra, 0.0)  * emb2.emb_peso * med2.med_factor AS decimal(18,2)))  AS LbsCajasRetra
+            FROM tb_DetalleRetractilado dret
+            INNER JOIN tb_produc pro2 ON dret.cod_prod    = pro2.pro_codcor
+            INNER JOIN tb_medida med2 ON pro2.pro_unimed   = med2.med_codigo
+            INNER JOIN tb_embala emb2 ON pro2.pro_embala   = emb2.emb_codigo
+            WHERE dret.cajas > 0.0 and  
+            CONVERT(char(10), dret.fec_crea, 111) BETWEEN    CONVERT(char(10), @feIni, 111) and CONVERT(char(10),  @feFin, 111)
+            GROUP BY dret.cod_prod, dret.lote, dret.cod_tal
+                 ,dret.fec_crea,emb2.emb_codigo;
+        ";
     }
 }
