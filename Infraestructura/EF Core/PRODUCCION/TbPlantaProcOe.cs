@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace CostManagement.Infraestructura.EF_Core;
+namespace CostManagementService.Infraestructura.EF_Core;
 
 [Table("tb_plantaProc_OE")]
 public partial class TbPlantaProcOe

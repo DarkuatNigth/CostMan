@@ -81,6 +81,15 @@ namespace CostManagementService.Dominio.Entidades
         [Column("Peso")]
         public double Peso { get; set; }
 
+        [Column("CodMaquinaPelado")]
+        public string? CodMaquinaPelado { get; set; }
+
+        [Column("MaquinaPelado")]
+        public string? MaquinaPelado { get; set; }
+
+        [Column("TipoPelado")]
+        public string? TipoPelado { get; set; }
+
         [NotMapped]
         [Column("LbsCajasRetra")]
         public decimal LbsCajasRetra { get; set; }
@@ -121,9 +130,16 @@ namespace CostManagementService.Dominio.Entidades
         [Column("blDescabezado")]
         public bool BlDescabezado { get; set; }
 
+        
+        [Column("TIPO EMBAL")]
+        public string? strTipoEmbal { get; set; }
+
         // ── BODEGA / EMBALAJE / MEDIDA ──
         [Column("BodCodigo")]
         public string BodCodigo { get; set; }
+
+        [Column("BodDescri")]
+        public string BodDescri { get; set; }
 
         // CORREGIDO: bool? -> byte (SQL retorna tinyint, EF no convierte tinyint a bool)
         [Column("BodEsBrine")]
@@ -156,13 +172,23 @@ namespace CostManagementService.Dominio.Entidades
         [Column("lot_observacion")]
         public string? LotObservacion { get; set; }
 
+        [Column("lid_clasificadora")]
+        public string? LidClasificadora { get; set; }
+
+        [Column("Clasificadora")]
+        public string? Clasificadora { get; set; }
+
         [NotMapped]
         public LoteFrsKey objRpckey { get; set; }
+
+        [NotMapped]
+        public LoteRpcKeyXProdTal objProdTal { get; set; }
 
         public void ConstruirKey()
         {
             int intCodProd = int.TryParse(LidProduc, out int result) ? result : 0;
             objRpckey = new LoteFrsKey((int)LoteUnificado, intCodProd, LidCodtal);
+            objProdTal = new LoteRpcKeyXProdTal(intCodProd, LidCodtal);
         }
     }
 }

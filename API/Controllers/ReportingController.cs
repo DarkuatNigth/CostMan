@@ -183,6 +183,48 @@ namespace CostManagement.API.Controllers
         }
 
 
+
+        [HttpGet("material-empaque-auditoria")]
+        public async Task<IActionResult> AuditarCostoMaterialEmpaque(
+            DateOnly dtFechaInicio,
+            DateOnly dtFechaFin,
+            string? strProducto = null,
+            int? intLote = null,
+            bool blSoloErrores = false)
+        {
+            try
+            {
+                var resultado = await _objCostoMateriaPrima.AuditarMaterialEmpaque(
+                    dtFechaInicio,
+                    dtFechaFin,
+                    strProducto,
+                    intLote,
+                    blSoloErrores);
+
+                var dtResult = new DataTablesResultDto
+                {
+                    Table = resultado.lstResumen.AListaDeDiccionarios(),
+                    Table1 = resultado.lstDetalle.AListaDeDiccionarios()
+                };
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Auditoría de material de empaque ejecutada correctamente",
+                    objData = dtResult
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error en auditoría de material de empaque: " + ex.Message,
+                    objData = ""
+                });
+            }
+        }
+
         [HttpGet("materia-prima-repro")]
         public async Task<IActionResult> ObtenerCostoMateriaPrimaRepro(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
@@ -439,8 +481,9 @@ namespace CostManagement.API.Controllers
             {
 
                 var lstResult =
-                    await _objOperacionComercial.ConsultarCostoVentaUni(dtFechaInicio, dtFechaFin);
-                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+                    await _objOperacionComercial.ConsultarCostoVentaUniDisponible(dtFechaInicio, dtFechaFin);
+                //_objOperacionComercial.ConsultarCostoVentaUni(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult.lstDisponibleLote, 0);
 
                 return Ok(new ApiResponse<DataTablesResultDto>
                 {
@@ -536,8 +579,8 @@ namespace CostManagement.API.Controllers
                         break;
 
                     case "costo-venta-uni":
-                        var objCostVen = await _objOperacionComercial.ConsultarCostoVentaUni(fechaInicio, fechaFin);
-                        dataTable = objCostVen.ADataTable();
+                        var objCostVen = await _objOperacionComercial.ConsultarCostoVentaUniDisponible(fechaInicio, fechaFin);
+                        dataTable = objCostVen.lstDisponibleLote.ADataTable();
                         break;
 
                     default:

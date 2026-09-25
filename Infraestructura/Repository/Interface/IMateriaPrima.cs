@@ -2,6 +2,7 @@
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagementService.Aplicación.DTos;
+using CostManagementService.Dominio.Entidades;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -60,6 +61,12 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<CostoMatEmpProdXCietunDto>> ObtenerCostMatEmpRpcProdXLiq(List<decimal> lstLote);
         Task<ConcurrentDictionary<string, string>> ConsultarItemEtiqueta();
         Task<ConcurrentDictionary<string, string>> ConsultarItemMasterCajita();
+
+        Task ObtenerCostoPromMov2XFichaTecnica(
+            List<CostoMatEmpProdXCietunDto> lstInfoCierreTun,
+            DateOnly dtFechaInicio,
+            DateOnly dtFechaFin);
+
         Task ObtenerCostoPromBoditeXFichaTecnica(List<CostoMatEmpProdXCietunDto> lstInfoCierreTun, DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
         Task ObtenerCostoPromMov1XFichaTecnica(List<CostoMatEmpProdXCietunDto> lstInfoCierreTun, DateOnly dtFechaInicio, DateOnly dtFechaFin);
@@ -82,6 +89,8 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<InfoTalProd>> ObtenerInfoCodTal();
         Task<List<InfoProd>> ObtenerInfoProd(List<string> lstProdCod);
         Task<List<CostVentUni>> ConsultarLotePiso(List<decimal> lstLotNumero);
+
+        Task<List<ParamRectrac>> ObtenerInfoRectractiladoXLote(DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
     }
 }

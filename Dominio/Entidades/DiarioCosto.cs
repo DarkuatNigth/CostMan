@@ -1,5 +1,6 @@
 ﻿using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
+using CostManagementService.Infraestructura.EF_Core;
 using DocumentFormat.OpenXml.Office2016.Excel;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
@@ -571,6 +572,9 @@ namespace CostManagement.Aplicación.DTos
         [Column("Lote")]
         public int intLote { get; set; }
 
+        [JsonIgnore]
+        public int? intLoteOrigen { get; set; }
+
         [Column("CodProd")]
         public int intCodProd { get; set; }
 
@@ -681,6 +685,7 @@ namespace CostManagement.Aplicación.DTos
                 strTipoLiq = objLiqRpc.strTipDescri;
                 intLoteUni = objLiqRpc.intLotNumero;
                 intLote = objLiqRpc.intLoteUnificado;
+                intLoteOrigen = objLiqRpc.intLoteOrigen;
                 intCodProd = (int)objLiqRpc.intCodProd;
                 strDescripcion = objLiqRpc.strDescriProduc;
                 strTalla = objLiqRpc.strTalDescri;
@@ -793,16 +798,79 @@ namespace CostManagement.Aplicación.DTos
 
     public class InfoProd
     {
-
+        private static readonly HashSet<int> _hshListDecora = new HashSet<int> { 2, 3 };
+        private static readonly HashSet<int> _hshListRetrac = new HashSet<int> { 3, 4 };
+        private static readonly Dictionary<double, int> _dicHomologaLbs = new Dictionary<double, int> { { 1, 1000 } };
+        private static readonly Dictionary<string, decimal> _dicHomologaTarLLena = new Dictionary<string, decimal> { { "5412", 0.0443m } };
         public string strProCodcor { get; set; }
         public string strProDesesp { get; set; }
         public string strProClas01 { get; set; }
-        public string strProClas02 { get; set; }
+        public string? strProClas02 { get; set; }
         public string strProClas03 { get; set; }
+        public string strCodTipProc { get; set; }
         public string strProClas05 { get; set; }
         public string strProCodigo { get; set; }
-        public string strProDescri { get; set; }
-        public string strDprDescri { get; set; }
+        public string? strProDescri { get; set; }
+        public string? strDprDescri { get; set; }
+        public string strEmbCodigo { get; set; }
+        public int intEmbPeso { get; set; }
+        public int intMedCodigo { get; set; }
+        public int intProDecora { get; set; }
+        public int intProRetracti { get; set; }
+        public decimal dcCostoRetrac { get; set; }
+        public decimal dcCostoDec { get; set; }
+        public decimal dcCostoPelado { get; set; }
+
+        public List<TbTarifaProceso> lstTarPelado { get; set; }
+
+        public InfoProd()
+        {
+
+        }
+
+        public InfoProd(TbProduc pro, TbProces proc, string? DprDescri, TbEmbala emb, decimal medCodigo,
+            List<TbTarifaDecoradosRetractilado> lstTarDecRec,
+            List<TbTarifaProceso> TarPelado)
+        {
+            strProCodcor = pro.ProCodcor.Trim();
+            if (strProCodcor == "7052")
+            {
+                strProCodcor = pro.ProCodcor.Trim();
+            }
+            strProDesesp = pro.ProDesesp;
+            strProClas01 = pro.ProClas01;
+            strProClas03 = pro.ProClas03;
+            strProClas05 = pro.ProClas05;
+            strProCodigo = pro.ProCodigo;
+            strCodTipProc = proc?.ProTiplot != null ? proc?.ProTiplot.Trim() : null;
+            intProDecora = (int)pro.ProDecora;
+            intProRetracti = (int)pro.ProRetrac;
+            strProDescri = proc?.ProDescri;
+            strDprDescri = DprDescri;
+            strEmbCodigo = emb.EmbCodigo.Trim();
+            intEmbPeso = _dicHomologaLbs.GetValueOrDefault(emb.EmbPeso, (int)emb.EmbPeso);
+                //(int)emb.EmbPeso == 1 ? (int)(emb.EmbPeso* 1000) : (int)emb.EmbPeso;
+            intMedCodigo = (int)medCodigo;
+            TbTarifaDecoradosRetractilado? objTar = lstTarDecRec.FirstOrDefault(t => /*t.TrMedCodigo == this.intMedCodigo && t.TrEmbPeso == this.intEmbPeso &&*/ t.TrEmbCodigo == this.strEmbCodigo);
+            
+            if (objTar != null)
+            {
+                decimal dcCostoDeco = _dicHomologaTarLLena.GetValueOrDefault(strProCodcor, objTar?.TrDecorado ?? 0);
+                decimal dcCostoRetrac = objTar?.TrRetractilado ?? 0;
+                this.dcCostoDec = dcCostoDeco ;
+                this.dcCostoRetrac = dcCostoRetrac ;
+                //this.dcCostoDec = Math.Round(dcCostoDeco / 2.2046m,4);
+                //this.dcCostoRetrac = Math.Round(dcCostoRetrac / 2.2046m, 4);
+            }
+            if (TarPelado.Where(t => t.TpTipoProceso == this.strCodTipProc).ToList() != null)
+            {
+                lstTarPelado = TarPelado.Where(t => t.TpTipoProceso == this.strCodTipProc).ToList();
+            }
+            else
+            {
+                lstTarPelado = null;
+            }
+        }
 
     }
 

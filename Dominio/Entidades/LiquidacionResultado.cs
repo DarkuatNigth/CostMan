@@ -185,8 +185,16 @@ namespace CostManagement.Dominio.Entidades
         [Column("Total Proceso")]
         public decimal? dcCostTotalProc { get; set; }
 
+        [Column("Total Warren")]
+        public decimal? dcTotalWarren { get; set; }
+
+        // Mantener dcTotalDolSum como está:
         [Column("Total Costos")]
         public decimal dcTotalDolSum { get; set; }
+
+        // Agregar inmediatamente debajo de dcTotalDolSum:
+        [Column("Total Costo Warren")]
+        public decimal? dcTotalCostoWarren { get; set; }
         //[NotMapped]
         //[JsonIgnore]
         [Column("Costo X Libra")]
@@ -216,6 +224,9 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         [Column("BodEsBrine")]
         public bool blBodEsBrine { get; set; }
+
+        [JsonIgnore]
+        public decimal? dcCostLogistica { get; set; }
 
         [JsonIgnore]
         public decimal? dcCostRecepcion { get; set; }
@@ -294,6 +305,18 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         [Column("LiqCopack")]
         public int intCodCopacking { get; set; }
+
+        [JsonIgnore]
+        [Column("Rendimiento")]
+        public decimal dcRendimiento{ get; set; }
+
+        [JsonIgnore]
+        [Column("LbsReciXRend")]
+        public decimal dcLbsReciXRend { get; set; }
+
+        [JsonIgnore]
+        [NotMapped]
+        public bool blRetractilado { get; set; }
 
         //Por ahora solo usado con fresco
         [NotMapped]
@@ -623,10 +646,10 @@ namespace CostManagement.Dominio.Entidades
         /// </summary>
         /// <param name="lstMatPrimaFrs">Lista de objetos con los costos.</param>
         /// <returns>Diccionario donde la llave es (Lote, Producto, Talla) y el valor es el Precio Promedio calculado.</returns>
-        public static Dictionary<(int Lote, int? Producto, int? Talla), decimal?> GenerarDiccionarioCostoXTalla(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        public static Dictionary<LoteFrsKey, decimal?> GenerarDiccionarioCostoXTalla(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
         {
             if (lstMatPrimaFrs == null)
-                return new Dictionary<(int, int?, int?), decimal?>();
+                return new Dictionary<LoteFrsKey, decimal?>();
 
             return (
                             from lct in lstMatPrimaFrs
@@ -634,13 +657,11 @@ namespace CostManagement.Dominio.Entidades
                             let dcCertificado = lct.dcValorCert == null ? 0m : lct.dcValorCert
                             group new { lct, dcCostMatEmp, dcCertificado } by new
                             {
-                                Lote = lct.intLote,
-                                Producto = lct.intCodProd,
-                                Talla = lct.intLidCodTal
+                                lct.objLotkey
                             } into g
                             select new
                             {
-                                Key = (g.Key.Lote, g.Key.Producto, g.Key.Talla),
+                                Key = g.Key.objLotkey,
                                 PrecioPromedio = g.Average(x => x.lct.dcCostoTotXLibra)
                             }
                         ).ToDictionary(x => x.Key, x => x.PrecioPromedio);
@@ -721,6 +742,11 @@ namespace CostManagement.Dominio.Entidades
 }
     public class ProcesoPrimarioDto
     {
+
+        [Column("Logistica")]
+        [JsonProperty("Logistica")]
+        public decimal? dcLogistica { get; set; }
+
         [Column("Recepcion")]
         [JsonProperty("Recepcion")]
         public decimal? dcRecepcion { get; set; }
@@ -766,6 +792,10 @@ namespace CostManagement.Dominio.Entidades
         [Column("Descabezado")]
         [JsonProperty("Descabezado")]
         public decimal? dcDescabezado { get; set; }
+
+        [Column("Descongelado")]
+        [JsonProperty("Descongelado")]
+        public decimal? dcDescongelado { get; set; }
 
         [Column("Pelado")]
         [JsonProperty("Pelado")]
