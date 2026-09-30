@@ -1,8 +1,12 @@
 ﻿using CostManagement.Aplicación.DTos;
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
+using CostManagementService.Aplicacion.DTos;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Vml;
 using System.Collections.Concurrent;
+using System.Linq;
+using System.Runtime.Serialization;
 
 namespace CostManagement.Dominio.Reglas
 {
@@ -16,7 +20,12 @@ namespace CostManagement.Dominio.Reglas
         private static readonly List<string> _lstNotProcSecun = new() { "DE" };
         private static readonly List<string> _lstNotPresen = new() { "EN1", "SH2" };
         private static readonly HashSet<string> _lstCodTarifaProceso = new(StringComparer.OrdinalIgnoreCase) { "CAM", "R1", "R2", "R3", "20", "RS", "VR", "VE", "RCC", "RCC2", "RCB", "ECH", "RERE", "REET" };
-
+        private static Dictionary<string, InfoProd> _dicInfoProd = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<int> _hshProdCod = new HashSet<int> { 6440, 6761, 5412, 5413, 6372, 5587, 6233, 6437, 5013 };
+        private static readonly HashSet<int> _hshListDecora = new HashSet<int> { 2, 3 };
+        private static readonly HashSet<int> _hshListRetrac = new HashSet<int> { 3, 4 };
+        private const decimal _dcTarifaDescongelado = 0.02m;
+        private static HashSet<InfoProd> _hshInfoProd = new HashSet<InfoProd> { };
         private static readonly HashSet<string> _hsCodEtiqueta = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "CAM", "VE" };
         private static readonly HashSet<string> _hsCodReempaque = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "R3", "VR" };
         private static readonly List<string> _lstNotCostDirec = new()
@@ -67,11 +76,16 @@ namespace CostManagement.Dominio.Reglas
             try
             {
                 var dicTotales = new Dictionary<string, decimal>();
+                var objLibras = new AcumuladorLibrasParticion();   // ← NUEVO
 
                 // 1. Recepción y Productos Terminados
-                decimal sumRloNetas = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcLibras);
-                decimal sumRloProCabCol = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcLibras);
-                decimal dcSumCopacking = (decimal)objDataProceso.lstLiqFresco.Where(x => x.intCodCopacking > 0 && x.strPlanta != "SONGA").Sum(x => x.dcLibras);
+                decimal dcLibrasFrescoTotal = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcLibras);
+                decimal sumRloNetas = dcLibrasFrescoTotal;
+                decimal sumRloProCabCol = dcLibrasFrescoTotal;
+                List<LiquidacionResultado> lstCopacking = objDataProceso.lstLiqFresco
+                    .Where(x => x.intCodCopacking > 0 && x.strPlanta != "SONGA")
+                    .ToList();
+                decimal dcSumCopacking = (decimal)lstCopacking.Sum(x => x.dcLibras);
                 decimal dcSumMatEmpaque = (decimal)objDataProceso.lstLiqFresco.Sum(x => x.dcCostoTotalMatEmp ?? 0);
                 objMatEmpaqueFrs = new ProcesoResultadoDto
                 {
@@ -81,20 +95,31 @@ namespace CostManagement.Dominio.Reglas
                     strEstado = "AC",
                     strDescripcion = "Material Empaque",
                     blEditable = false,
-                    strTipoLote = "RPC",
+                    strTipoLote = "FRS",
                     dcValor = dcSumMatEmpaque,
                     dcLibras = sumRloNetas,
                     dcCostUnitario = dcSumMatEmpaque != 0 ? dcSumMatEmpaque / sumRloNetas : 0,
                 };
                 objDataProceso.lstProcesoFrs.Add(objMatEmpaqueFrs);
 
+                dicTotales["Logistica"] = sumRloNetas;
                 dicTotales["Recepcion"] = sumRloNetas;
                 dicTotales["Excedente M.E."] = sumRloProCabCol;
                 // 2. Unificación de Productos Terminados y Descuentos (Llaves fijas)
                 foreach (var item in objDataProceso.lstProdTerm.Concat(objDataProceso.lstDescTotFresco))
                 {
                     dicTotales[item.Trim()] = sumRloProCabCol;
+                    objLibras.AcumularDesde(item.Trim(), objDataProceso.lstLiqFresco,
+                        x => ParticionCosteo.ClasificarFrs(x.strProClas01, x.strProClas05),
+                        x => (decimal)x.dcLibras);
                 }
+
+                objLibras.AcumularDesde("Logistica", objDataProceso.lstLiqFresco,
+                        x => ParticionCosteo.ClasificarFrs(x.strProClas01, x.strProClas05),
+                        x => (decimal)x.dcLibras);
+                objLibras.AcumularDesde("Recepcion", objDataProceso.lstLiqFresco,
+                        x => ParticionCosteo.ClasificarFrs(x.strProClas01, x.strProClas05),
+                        x => (decimal)x.dcLibras);
 
                 // 3. Iteración Unificada de lstLiqFresco (Cálculo por condiciones)
                 // Asumimos que lstLiqFresco contiene los datos necesarios para clasificar los costos
@@ -115,6 +140,8 @@ namespace CostManagement.Dominio.Reglas
                     if (!string.IsNullOrEmpty(item.strProClas01) && item.strProClas01 == "SC")
                     {
                         ActualizarDiccionario(dicTotales, "Descabezado", (decimal)item.dcLibras);
+                        objLibras.Acumular("Descabezado",
+                                ParticionCosteo.ClasificarFrs(item.strProClas01, item.strProClas05), (decimal)item.dcLibras);
                     }
 
                     // --- Lógica de Congelamiento (Tunel / Brine) ---
@@ -122,11 +149,22 @@ namespace CostManagement.Dominio.Reglas
                     if (objDataProceso.lstCongTunel.Contains(item.intProCongela) && item.strProClas03 == "PT")
                     {
                         ActualizarDiccionario(dicTotales, "Tunel", (decimal)item.dcLibras);
+                        objLibras.Acumular("Tunel",
+                                    ParticionCosteo.ClasificarFrs(item.strProClas01, item.strProClas05), (decimal)item.dcLibras);
                     }
 
                     if (item.dcLibrasRetractilado != null)
                     {
                         ActualizarDiccionario(dicTotales, "Retractilado", (decimal)item.dcLibrasRetractilado);
+                        objLibras.Acumular("Retractilado",
+                                ParticionCosteo.ClasificarFrs(item.strProClas01, item.strProClas05), (decimal)item.dcLibrasRetractilado);
+                    }
+
+                    if (item.dcLibrasDecorado != null)
+                    {
+                        ActualizarDiccionario(dicTotales, "Decorado", (decimal)item.dcLibrasDecorado);
+                        objLibras.Acumular("Decorado",
+                                ParticionCosteo.ClasificarFrs(item.strProClas01, item.strProClas05), (decimal)item.dcLibrasDecorado);
                     }
                     //else if (item.blBodEsBrine)
                     //{
@@ -140,6 +178,13 @@ namespace CostManagement.Dominio.Reglas
 
                 // Mapeo Final a los DTOs
                 FinalizarAsignacion(objDataProceso.lstProcesoFrs, dicTotales,null);
+                objLibras.AcumularDesde("C.Copacking", lstCopacking,
+                    x => ParticionCosteo.ClasificarFrs(x.strProClas01, x.strProClas05),
+                    x => (decimal)x.dcLibras);
+                objLibras.AcumularDesde("Material Empaque", objDataProceso.lstLiqFresco, 
+                    x => ParticionCosteo.ClasificarFrs(x.strProClas01, x.strProClas05), x => (decimal)x.dcLibras);
+                // ── NUEVO: exportar matriz ──
+                objDataProceso.lstLibrasParticion.AddRange(objLibras.AListaDto("PFR"));
             }
             catch (Exception objExcep)
             {
@@ -211,15 +256,25 @@ namespace CostManagement.Dominio.Reglas
             ProcesoResultadoDto objMatEmpaqueRpc;
             try
             {
-            var dicTotales = new Dictionary<string, decimal>();
-            List<string> lstNotCostConge = new List<string>() { /*"BP",*/
-                    "CAM","RLL","R1","CDI","R2","REC","LB04","RPY","R3","RS","DV","RVVL","BDP","VE","VR"
-                };
-            // 1. Costo Proceso Primario (Recepción y Productos Terminados)
-            decimal dcCostProcPrim = (decimal)objDataProceso.lstLiqRepro
-                .Where(x => x.strLotTipo == "RE" && _lstlbsProcPrim.Contains(x.strTipCod))
-                .Sum(obj => obj.dbLibras);
-            var dclbsValAgg = (decimal)objDataProceso.lstLiqRepro.Where(x => _lstlbsProcCostIndDic.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
+                var dicTotales = new Dictionary<string, decimal>();
+                var objLibras = new AcumuladorLibrasParticion();   // ← NUEVO
+                List<string> lstNotCostConge = new List<string>() { /*"BP",*/
+                        "CAM","RLL","R1","CDI","R2","REC","LB04","RPY","R3","RS","DV","RVVL","BDP","VE","VR"
+                    };
+                Func<MatPrimaReproceso, string?> fnPart = x => ParticionCosteo.ClasificarRpc(x.strTipoProducto);
+                // 1. Costo Proceso Primario (Recepción y Productos Terminados)
+                //
+                // OPTIMIZACIÓN: "Recepción", "Excedente M.E." y la base de
+                // "Clasificacion/Cajas" usan exactamente el mismo filtro
+                // (strLotTipo=="RE" && _lstlbsProcPrim.Contains(strTipCod)).
+                // Antes se evaluaba por separado (incluso sin materializar,
+                // re-escaneando lstLiqRepro una vez por cada categoría dentro
+                // del foreach de más abajo). Se materializa una sola vez.
+                List<MatPrimaReproceso> lstRecep = objDataProceso.lstLiqRepro
+                    .Where(x => x.strLotTipo == "RE" && _lstlbsProcPrim.Contains(x.strTipCod))
+                    .ToList();
+                decimal dcCostProcPrim = (decimal)lstRecep.Sum(x => x.dbLibras);
+                var dclbsValAgg = (decimal)objDataProceso.lstLiqRepro.Where(x => _lstlbsProcCostIndDic.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
                 decimal dcSumMatEmpaque = (decimal)objDataProceso.lstLiqRepro.Sum(x => x.dcCostoTotalMatEmp ?? 0);
                 objMatEmpaqueRpc = new ProcesoResultadoDto
                 {
@@ -234,35 +289,161 @@ namespace CostManagement.Dominio.Reglas
                     dcLibras = dcCostProcPrim,
                     dcCostUnitario = dcSumMatEmpaque != 0 ? dcSumMatEmpaque / dcCostProcPrim : 0,
                 };
+                var lstClasificacionR6 = objDataProceso.lstLiqRepro
+                    .Where(x => string.Equals(
+                        x.strTipCod?.Trim(),
+                        "R6",
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                decimal lbsClasificacionR6 = (decimal)lstClasificacionR6.Sum(x => x.dbLibras);
                 objDataProceso.lstProcesoRpc.Add(objMatEmpaqueRpc);
 
-            dicTotales["Recepcion"] = dcCostProcPrim;
-            dicTotales["Excedente M.E."] = dcCostProcPrim;
-            foreach (var item in objDataProceso.lstProdTerm)
-            {
-                dicTotales[item.Trim()] = dcCostProcPrim;
-            }
-            foreach (var item in objDataProceso.lstDescTotFresco)
-            {
-                dicTotales[item.Trim()] = dclbsValAgg + dcCostProcPrim;
-            }
+                dicTotales["Recepcion"] = dcCostProcPrim;
+                dicTotales["Excedente M.E."] = dcCostProcPrim;
+                foreach (var item in objDataProceso.lstProdTerm)
+                {
+                    if (item.Contains("Clasificacion", StringComparison.OrdinalIgnoreCase))
+                    {
+                        dicTotales[item.Trim()] = dcCostProcPrim + lbsClasificacionR6;
+                        // Primera participación normal
+                        objLibras.AcumularDesde(item.Trim(), lstRecep, fnPart, x => (decimal)x.dbLibras);
+                        // Segunda participación SOLO de R6
+                        objLibras.AcumularDesde(item.Trim(), lstClasificacionR6, fnPart, x => (decimal)x.dbLibras);
+                    }
+                    else
+                    {
+                        dicTotales[item.Trim()] = dcCostProcPrim;
+                        objLibras.AcumularDesde(item.Trim(), lstRecep, fnPart, x => (decimal)x.dbLibras);
+                    }
+                }
+                var lstValAggProcPrim = objDataProceso.lstLiqRepro.Where(x => x.strLotTipo == "RE").ToList();
+                lstValAggProcPrim.AddRange(objDataProceso.lstLiqRepro.Where(x => _lstlbsProcCostIndDic.Contains(x.strTipCod)));
 
-            // 2. Filtros específicos de Reproceso
-                dicTotales["Cocido"] = (decimal)objDataProceso.lstLiqRepro.Where(x => !string.IsNullOrEmpty(x.strRecNombre) && x.strRecTipo == "COC" && x.strLotTipo == "VA").Sum(obj => obj.dbLibras);
-                dicTotales["Hidratacion"] = (decimal)objDataProceso.lstLiqRepro.Where(x => !string.IsNullOrEmpty(x.strRecNombre) && x.strRecTipo != "COC" && x.strLotTipo == "VA").Sum(obj => obj.dbLibras);
-                dicTotales["Retractilado"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.blRetractilado).Sum(obj => obj.dcLibrasRetractilado);
-                dicTotales["Pelado"] = (decimal)objDataProceso.lstLiqRepro.Where(obj => obj.blPelado).Sum(obj => obj.dcLibrasPelado);
-                dicTotales["Decorado"] = (decimal)objDataProceso.lstLiqRepro.Where(obj => obj.blDecorado).Sum(obj => obj.dbLibras);
-                dicTotales["Descabezado"] = (decimal)objDataProceso.lstLiqRepro.Where(obj => obj.blEsDescabezado).Sum(obj => obj.dbLibras);
-                dicTotales["IQF"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.strCongeProduc.Trim().Equals("IQF") && !lstNotCostConge.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
-                dicTotales["Brine"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.strCongeProduc.Trim().Equals("BRINE") && !lstNotCostConge.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
-                dicTotales["Tunel"] = (decimal)objDataProceso.lstLiqRepro.Where(x => (x.strCongeProduc.Trim().Equals("BLOCK") || x.strCongeProduc.Trim().Equals("SEMI IQF")) && !lstNotCostConge.Contains(x.strTipCod)).Sum(obj => obj.dbLibras);
-                dicTotales["C.Copacking"] = (decimal)objDataProceso.lstLiqRepro.Where(x => x.intCodCopacking != 0).Sum(obj => obj.dbLibras);
-            
+                foreach (var item in objDataProceso.lstDescTotFresco)
+                {
+                    dicTotales[item.Trim()] = dclbsValAgg + dcCostProcPrim;
+                    objLibras.AcumularDesde(item.Trim(), lstValAggProcPrim,fnPart, x => (decimal)x.dbLibras);
+                }
+                objLibras.AcumularDesde("Recepcion", lstRecep, fnPart, x => (decimal)x.dbLibras);
+                objLibras.AcumularDesde("Material Empaque", objDataProceso.lstLiqRepro, fnPart, x => (decimal)x.dbLibras);
 
-            // Mapeo Final
-            FinalizarAsignacion(objDataProceso.lstProcesoRpc, dicTotales, objDataProceso.dcCostoHidraReproceso);
-        }
+                // 2. Filtros específicos de Reproceso
+                //
+                // OPTIMIZACIÓN: antes eran 9 pasadas independientes sobre lstLiqRepro
+                // (cada una con su propio .Where().ToList().Sum()). Se consolidan en
+                // una sola pasada por lote; las condiciones y los campos sumados por
+                // categoría son exactamente los mismos que antes. Las claves se
+                // pre-siembran en 0 para preservar el comportamiento cuando ningún
+                // lote cae en una categoría (antes la asignación directa "=" dejaba
+                // la clave en 0 igual; con ActualizarDiccionario (+=) hace falta
+                // sembrarla para que FinalizarAsignacion no la deje sin tocar).
+                dicTotales["Cocido"] = 0m;
+                dicTotales["Hidratacion"] = 0m;
+                dicTotales["Retractilado"] = 0m;
+                dicTotales["Pelado"] = 0m;
+                dicTotales["Decorado"] = 0m;
+                dicTotales["Descabezado"] = 0m;
+                dicTotales["IQF"] = 0m;
+                dicTotales["Brine"] = 0m;
+                dicTotales["Tunel"] = 0m;
+                dicTotales["C.Copacking"] = 0m;
+
+                foreach (var item in objDataProceso.lstLiqRepro)
+                {
+                    string? strParticion = fnPart(item);
+
+                    if (!string.IsNullOrEmpty(item.strRecNombre) && item.strRecTipo == "COC" && item.strLotTipo == "VA")
+                    {
+                        ActualizarDiccionario(dicTotales, "Cocido", (decimal)item.dbLibras);
+                        objLibras.Acumular("Cocido", strParticion, (decimal)item.dbLibras);
+                    }
+
+                    if (!string.IsNullOrEmpty(item.strRecNombre) && item.strRecTipo != "COC" && item.strLotTipo == "VA")
+                    {
+                        ActualizarDiccionario(dicTotales, "Hidratacion", (decimal)item.dbLibras);
+                        objLibras.Acumular("Hidratacion", strParticion, (decimal)item.dbLibras);
+                    }
+
+                    if (item.blRetractilado)
+                    {
+                        ActualizarDiccionario(dicTotales, "Retractilado", (decimal)item.dcLibrasRetractilado);
+                        objLibras.Acumular("Retractilado", strParticion, (decimal)item.dcLibrasRetractilado);
+                    }
+
+                    if (item.blPelado)
+                    {
+                        ActualizarDiccionario(dicTotales, "Pelado", (decimal)item.dcLibrasPelado);
+                        objLibras.Acumular("Pelado", strParticion, (decimal)item.dcLibrasPelado);
+                    }
+
+                    if (item.blDecorado)
+                    {
+                        ActualizarDiccionario(dicTotales, "Decorado", (decimal)item.dbLibras);
+                        objLibras.Acumular("Decorado", strParticion, (decimal)item.dbLibras);
+                    }
+
+                    if (item.blEsDescabezado)
+                    {
+                        ActualizarDiccionario(dicTotales, "Descabezado", (decimal)item.dbLibras);
+                        objLibras.Acumular("Descabezado", strParticion, (decimal)item.dbLibras);
+                    }
+
+                    string strCongeProduc = item.strCongeProduc.Trim();
+                    bool blCongelaCosteable = !lstNotCostConge.Contains(item.strTipCod);
+
+                    if (strCongeProduc.Equals("IQF") && blCongelaCosteable)
+                    {
+                        ActualizarDiccionario(dicTotales, "IQF", (decimal)item.dbLibras);
+                        objLibras.Acumular("IQF", strParticion, (decimal)item.dbLibras);
+                    }
+
+                    if (strCongeProduc.Equals("BRINE") && blCongelaCosteable)
+                    {
+                        ActualizarDiccionario(dicTotales, "Brine", (decimal)item.dbLibras);
+                        objLibras.Acumular("Brine", strParticion, (decimal)item.dbLibras);
+                    }
+
+                    if ((strCongeProduc.Equals("BLOCK") || strCongeProduc.Equals("SEMI IQF")) && blCongelaCosteable)
+                    {
+                        ActualizarDiccionario(dicTotales, "Tunel", (decimal)item.dbLibras);
+                        objLibras.Acumular("Tunel", strParticion, (decimal)item.dbLibras);
+                    }
+
+                    if (item.intCodCopacking != 0)
+                    {
+                        ActualizarDiccionario(dicTotales, "C.Copacking", (decimal)item.dbLibras);
+                        objLibras.Acumular("C.Copacking", strParticion, (decimal)item.dbLibras);
+                    }
+                }
+
+
+                var lstRecibidosDescongelado =objDataProceso.lstLiqReproCompleto.Where(x =>
+                                string.Equals(x.strAgrupacion,"1. RECIBIDO",StringComparison.OrdinalIgnoreCase)
+                                && x.blEsDescongelado == true).ToList();
+
+                decimal lbsDescongelado = (decimal)lstRecibidosDescongelado.Sum(x => x.dbLibras);
+
+                dicTotales["Descongelado"] = lbsDescongelado;
+
+                ProcesoResultadoDto? procesoDescongelado =
+                    objDataProceso.lstProcesoRpc.FirstOrDefault(
+                        x => string.Equals(
+                            x.strDescripcion?.Trim(),
+                            "Descongelado",
+                            StringComparison.OrdinalIgnoreCase));
+
+                if (procesoDescongelado != null)
+                {
+                    procesoDescongelado.blEditable = false;
+                    procesoDescongelado.dcLibras = Math.Round(lbsDescongelado, 2);
+                    procesoDescongelado.dcValor =
+                        Math.Round(lbsDescongelado * _dcTarifaDescongelado, 4);
+                    procesoDescongelado.dcCostUnitario = _dcTarifaDescongelado;
+                }
+                // Mapeo Final
+                FinalizarAsignacion(objDataProceso.lstProcesoRpc, dicTotales, objDataProceso.dcCostoHidraReproceso);
+                objDataProceso.lstLibrasParticion.AddRange(objLibras.AListaDto("RPC"));
+            }
             catch (Exception ex)
             {
                 _objLogger.LogError("[MotorProcesoParametro].[AsignarCostoProcesoRpc] Error {error}", ex.Message);
@@ -327,10 +508,16 @@ namespace CostManagement.Dominio.Reglas
                 objCostUnit = CostosUnitarios.ExtraerCostosUnitarios(dictCosto);
                 dicTarifasPorCodigo = ProcesoResultadoDto.ConstruirDictTarifasPorCodigo(objDataProceso.lstProcesoTarifa, dicTiplot);
                 lstLiqRepro = objDataProceso.lstLiqRepro.Where(l => l.strAgrupacion == "2. PROCESADO").ToList();
+                _dicInfoProd = objDataProceso.lstInfoProd
+                        .GroupBy(obj => obj.strProCodcor)
+                        .ToDictionary(g => g.Key, g => g.First());
                 foreach (var objLiq in lstLiqRepro)
                     AplicarCostosALiquidacion(objLiq, objCostUnit, dicTarifasPorCodigo);
+
+
+                AplicarDescongeladoGlobal(objDataProceso, lstLiqRepro, _dcTarifaDescongelado);
             }
-            catch (Exception ex)
+            catch (Exception ex) 
             {
                 _objLogger.LogError(
                     "[ProcesoParametro].[ObtenerCostosProcesosMatPrimPFR] : {Mensaje}",
@@ -343,6 +530,7 @@ namespace CostManagement.Dominio.Reglas
                                         CostosUnitarios c,
                                         ConcurrentDictionary<string, decimal> dicTarifasPorCodigo)
         {
+            liq.objInfoProd = _dicInfoProd.GetValueOrDefault(liq.intCodProd.ToString(), null);
             AplicarCostoTarifa(liq, dicTarifasPorCodigo);
             AplicarProcesoPrimario(liq, c);
             AplicarProcesoPresentacion(liq, c);
@@ -352,6 +540,63 @@ namespace CostManagement.Dominio.Reglas
             AplicarCostosIndirectos(liq, c);
             AplicarCopacking(liq, c);
             liq.dcCostTotalProc = CalcularCostoTotal(liq);
+        }
+
+        private static void AplicarDescongeladoGlobal( DataProcesoParam objDataProceso,List<MatPrimaReproceso> lstProcesados, decimal tarifa)
+        {
+            // En ObtenerParametroProceso se conserva RECIBIDO+PROCESADO aquí.
+            // En otros flujos, lstLiqRepro puede ya contener ambos; se deja fallback.
+            List<MatPrimaReproceso> universo =
+                objDataProceso.lstLiqReproCompleto != null &&
+                objDataProceso.lstLiqReproCompleto.Any()
+                    ? objDataProceso.lstLiqReproCompleto
+                    : (objDataProceso.lstLiqRepro ?? new List<MatPrimaReproceso>());
+
+            var recibidos = universo
+                .Where(x =>
+                    x.strAgrupacion == "1. RECIBIDO" &&
+                    x.strProClas03 == "PT" &&
+                    x.blEsDescongelado == true &&
+                    x.dbLibras > 0)
+                .ToList();
+
+            var salidas = lstProcesados
+                .Where(x =>
+                    (x.strProClas03 == "PT" || x.strProClas03 == "PP") &&
+                    x.dbLibras > 0)
+                .ToList();
+
+            foreach (var grupo in recibidos.GroupBy(
+                x => (x.intLotNumero, x.intLoteUnificado)))
+            {
+                decimal lbsRecibidas =  (decimal)grupo.Sum(x => x.dbLibras);
+
+                decimal montoLote =  Math.Round(lbsRecibidas * tarifa, 6);
+
+                List<MatPrimaReproceso> salidasLote =  salidas.Where(x =>x.intLotNumero == grupo.Key.intLotNumero && x.intLoteUnificado == grupo.Key.intLoteUnificado).ToList();
+                decimal lbsSalida = (decimal)salidasLote.Sum(x => x.dbLibras);
+
+                if (lbsSalida <= 0m)
+                    continue;
+
+                decimal asignado = 0m;
+
+                for (int i = 0; i < salidasLote.Count; i++)
+                {
+                    MatPrimaReproceso salida = salidasLote[i];
+
+                    decimal montoSalida = i == salidasLote.Count - 1 ? Math.Round(montoLote - asignado, 6)
+                            : Math.Round( montoLote * (decimal)salida.dbLibras / lbsSalida,
+                                6);
+
+                    if (i < salidasLote.Count - 1)
+                        asignado += montoSalida;
+
+                    salida.ProcesoSecundario.dcDescongelado =
+                        (salida.ProcesoSecundario.dcDescongelado ?? 0m)
+                        + montoSalida;
+                }
+            }
         }
 
         private static void AplicarProcesoPrimario(MatPrimaReproceso objLiq, CostosUnitarios c)
@@ -371,15 +616,44 @@ namespace CostManagement.Dominio.Reglas
 
         private static void AplicarProcesoPresentacion(MatPrimaReproceso liq, CostosUnitarios c)
         {
-            if (_lstNotPresen.Contains(liq.strTipCod)) return;
+            List<LoteRpcKeyXProdTal> objProd = new List<LoteRpcKeyXProdTal> { new LoteRpcKeyXProdTal( 5177, 25), new LoteRpcKeyXProdTal(5412, 25) };
+            try
+            {
+                if (_lstNotPresen.Contains(liq.strTipCod)) return;
+                if(liq.strTipCod != "CAM" && liq.intCodProd == 7052)
+                {
+                    liq.blDecorado = liq.blDecorado /*&& objInfoProd != null */&& (_hshListDecora.Contains(liq.objInfoProd.intProDecora) || !_hshListDecora.Contains(liq.objInfoProd.intProDecora));
+                }
+                //InfoProd objInfoProd = _dicInfoProd.GetValueOrDefault(liq.intCodProd.ToString(), null);
+                //liq.blDecorado = liq.blDecorado && objInfoProd == null ? liq.blDecorado && _hshListDecora.Contains(objInfoProd.intProDecora) : false;
+                liq.blDecorado = liq.blDecorado && liq.objInfoProd != null && (_hshListDecora.Contains(liq.objInfoProd.intProDecora) || !_hshListDecora.Contains(liq.objInfoProd.intProDecora));
+                liq.blRetractilado = liq.blRetractilado && liq.objInfoProd != null ? liq.blRetractilado && _hshListRetrac.Contains(liq.objInfoProd.intProRetracti) : false;
+                liq.ProcesoPresentacion.dcDecorado = 
+                    liq.blDecorado? Math.Round((decimal)liq.dbLibras * liq.objInfoProd.dcCostoDec, 4)//Math.Round((decimal)liq.dbLibras * c.dcDecorado, 4) 
+                        : 0;
+                if (objProd.Contains(liq.objProdTalKey))
+                {
+                    var db = Convert.ToDouble(liq.objInfoProd.dcCostoDec);
+                    var dbKg = Convert.ToDouble(liq.objInfoProd.dcCostoDec) * 2.2046;
+                    var dblbs = dbKg  / 2.2046;
+                    var objDb = liq.dbLibras * Convert.ToDouble(liq.objInfoProd.dcCostoDec);
+                }
+                if (liq.objInfoProd != null)
+                {
+                    decimal dcLbsRetrac = liq.blRetractilado && liq.dcLibrasRetractilado.HasValue ? liq.dcLibrasRetractilado.Value : (decimal)liq.dbLibras;
+                    liq.ProcesoPresentacion.dcRetractilado =
+                        liq.blRetractilado ? Math.Round(dcLbsRetrac * liq.objInfoProd.dcCostoRetrac, 4) //Math.Round((decimal)liq.dcLibrasRetractilado * c.dcRetractilado, 4) 
+                        : 0;
+                    liq.dcRetractilado = liq.blRetractilado ? liq.ProcesoPresentacion.dcRetractilado : 0;
+                }
 
-            liq.ProcesoPresentacion.dcDecorado =
-                liq.blDecorado ? Math.Round((decimal)liq.dbLibras * c.dcDecorado, 4) : 0;
-            liq.ProcesoPresentacion.dcRetractilado =
-                liq.blRetractilado ? Math.Round((decimal)liq.dcLibrasRetractilado * c.dcRetractilado, 4) : 0;
-
-            liq.dcDecorado = liq.blDecorado ? c.dcDecorado : 0;
-            liq.dcRetractilado = liq.blRetractilado ? c.dcRetractilado : 0;
+                liq.dcDecorado = liq.blDecorado ? liq.ProcesoPresentacion.dcDecorado : 0;
+            }
+            catch (Exception obj)
+            {
+                _hshInfoProd.Add(liq.objInfoProd);
+                Console.WriteLine(obj.Message + obj.Source);
+            }
         }
 
         private static void AplicarProcesoCongelacion(MatPrimaReproceso liq, CostosUnitarios c)
@@ -404,32 +678,48 @@ namespace CostManagement.Dominio.Reglas
 
         private static void AplicarProcesoSecundario(MatPrimaReproceso liq, CostosUnitarios c)
         {
-            decimal libras = (decimal)liq.dbLibras;
+            try
+            {
+                if (liq.strTipCod == "EZ" && liq.intCodProd == 3861)
+                {
+                    Console.WriteLine(liq.intCodProd);
+                }
+                decimal libras = (decimal)liq.dbLibras;
+                if (liq.objInfoProd != null && liq.blPelado)
+                {
+                    var objTarifaPelado = liq.objInfoProd.lstTarPelado.FirstOrDefault(x => x.TpTalCodigo == liq.intCodTal);
+                    if (objTarifaPelado != null)
+                    {
+                        liq.ProcesoSecundario.dcPelado = Math.Round((decimal)liq.dcLibrasPelado * objTarifaPelado.TpTarifa, 4);
+                        liq.dcPelado = liq.blPelado ? liq.ProcesoSecundario.dcPelado : 0;
+                    }
+                }
+                // Pelado
+                //liq.ProcesoSecundario.dcPelado = liq.blPelado
+                //    ? Math.Round((decimal)liq.dcLibrasPelado * c.dcPelado, 4) : 0;
+                //liq.dcPelado = liq.blPelado ? c.dcPelado : 0;
 
-            // Pelado
-            liq.ProcesoSecundario.dcPelado = liq.blPelado
-                ? Math.Round((decimal)liq.dcLibrasPelado * c.dcPelado, 4) : 0;
-            liq.dcPelado = liq.blPelado ? c.dcPelado : 0;
+                // Hidratación (sal + hidra)
+                decimal dcValorHidra = (decimal)liq.dbLibras * c.dcHidratacion;
 
-            // Hidratación (sal + hidra)
-            //decimal valorSal = ((liq.dcCthSallbs ?? 0m) * (liq.dcRecPorSal ?? 0m)) / 2.2046m;
-            //decimal valorHidra = (liq.dcCthHidlbs ?? 0m) * (liq.dcValorHidra ?? 0m);
-            //decimal costHidraSal = valorSal * (liq.dcValorSal ?? 0m);
-            //decimal totalHidra = costHidraSal + valorHidra;
-            decimal dcValorHidra = (decimal)liq.dbLibras * c.dcHidratacion ;
+                bool tieneReceta = !string.IsNullOrEmpty(liq.strRecNombre) && liq.strRecTipo != "COC" && liq.strLotTipo == "VA";
+                liq.ProcesoSecundario.dcHidratacion = tieneReceta ? Math.Round(dcValorHidra, 4) : 0;
+                liq.dcHidratacion = tieneReceta ? dcValorHidra : 0;
+                // Descabezado
+                liq.ProcesoSecundario.dcDescabezado = liq.blEsDescabezado
+                    ? Math.Round(libras * c.dcDescabezado, 4) : 0;
+                liq.dcDescabezado = liq.blEsDescabezado ? c.dcDescabezado : 0;
 
-            bool tieneReceta = !string.IsNullOrEmpty(liq.strRecNombre) && liq.strRecTipo != "COC" && liq.strLotTipo == "VA";
-            liq.ProcesoSecundario.dcHidratacion = tieneReceta ? Math.Round(dcValorHidra, 4) : 0;
-            liq.dcHidratacion = tieneReceta ? dcValorHidra : 0;
-            // Descabezado
-            liq.ProcesoSecundario.dcDescabezado = liq.blEsDescabezado
-                ? Math.Round(libras * c.dcDescabezado, 4) : 0;
-            liq.dcDescabezado = liq.blEsDescabezado ? c.dcDescabezado : 0;
-
-            // Cocido
-            bool esCocido = !string.IsNullOrEmpty(liq.strRecTipo) && liq.strRecTipo == "COC";
-            liq.ProcesoSecundario.dcCocido = esCocido ? Math.Round(libras * c.dcCocido, 4) : 0;
-            liq.dcCocido = esCocido ? Math.Round(libras * c.dcCocido, 4) : 0;
+                // Cocido
+                bool esCocido = !string.IsNullOrEmpty(liq.strRecTipo) && liq.strRecTipo == "COC";
+                liq.ProcesoSecundario.dcCocido = esCocido ? Math.Round(libras * c.dcCocido, 4) : 0;
+                liq.dcCocido = esCocido ? Math.Round(libras * c.dcCocido, 4) : 0;
+            }
+            catch(Exception obj)
+            {
+                _hshInfoProd.Add(liq.objInfoProd);
+                Console.WriteLine(obj.Message + obj.Source);
+            }
         }
 
         private static void AplicarCostosDirectos(MatPrimaReproceso objLiq, CostosUnitarios c)
@@ -495,6 +785,7 @@ namespace CostManagement.Dominio.Reglas
             (liq.ProcesoCongelacion.dcTunel ?? 0) +
             (liq.ProcesoCongelacion.dcIQF ?? 0) +
             // Proceso Secundario
+            (liq.ProcesoSecundario.dcDescongelado ?? 0) +
             (liq.ProcesoSecundario.dcPelado ?? 0) +
             (liq.ProcesoSecundario.dcHidratacion ?? 0) +
             (liq.ProcesoSecundario.dcDescabezado ?? 0) +
@@ -527,10 +818,16 @@ namespace CostManagement.Dominio.Reglas
                 dictCosto = ProcesoResultadoDto.ConstruirDictProc(objDataProceso.lstProcesoFrs);
                 // Reutilizamos tu struct existente para mapear el diccionario
                 CostosUnitarios objCostUnit = CostosUnitarios.ExtraerCostosUnitarios(dictCosto);
+                Dictionary<(string Pc, string Particion), decimal> dicUnitariosParticion =
+                    ConstruirUnitariosFrescoParticion(objDataProceso);
 
                 foreach (var liq in objDataProceso.lstLiqFresco)
                 {
-                    AplicarCostosALiquidacion(liq, objCostUnit, objDataProceso.lstCongTunel);
+                    AplicarCostosALiquidacion(
+                        liq,
+                        objCostUnit,
+                        objDataProceso.lstCongTunel,
+                        dicUnitariosParticion);
                 }
             }
             catch (Exception ex)
@@ -540,9 +837,14 @@ namespace CostManagement.Dominio.Reglas
             }
         }
 
-        private static void AplicarCostosALiquidacion(LiquidacionResultado objLiq, CostosUnitarios objCostUni, List<int> lstCongTunel)
+
+        private static void AplicarCostosALiquidacion(
+            LiquidacionResultado objLiq,
+            CostosUnitarios objCostUni,
+            List<int> lstCongTunel,
+            IReadOnlyDictionary<(string Pc, string Particion), decimal> dicUnitariosParticion)
         {
-            AplicarProcesoPrimario(objLiq, objCostUni);
+            AplicarProcesoPrimario(objLiq, objCostUni, dicUnitariosParticion);
             AplicarProcesoPresentacion(objLiq, objCostUni);
             AplicarProcesoCongelacion(objLiq, objCostUni, lstCongTunel);
             AplicarProcesoSecundario(objLiq, objCostUni);
@@ -559,27 +861,99 @@ namespace CostManagement.Dominio.Reglas
             }
         }
 
-        private static void AplicarProcesoPrimario(LiquidacionResultado objLiq, CostosUnitarios c)
+        private static void AplicarProcesoPrimario(
+             LiquidacionResultado objLiq,
+             CostosUnitarios c,
+             IReadOnlyDictionary<(string Pc, string Particion), decimal> dicUnitariosParticion)
         {
             decimal libras = (decimal)objLiq.dcLibras;
 
-            objLiq.ProcesoPrimario.dcRecepcion = Math.Round(libras * c.dcRecepcion, 4);
-            objLiq.ProcesoPrimario.dcClasificacion = Math.Round(libras * c.dcClasificacion, 4);
-            objLiq.ProcesoPrimario.dcCajas = Math.Round(libras * c.dcCajas, 4);
-            objLiq.dcExcedente = Math.Round((decimal)objLiq.dcLibras * c.dcExcedente, 2);
+            string particion = ParticionCosteo.ClasificarFrs(
+                objLiq.strProClas01,
+                objLiq.strProClas05) ?? string.Empty;
 
-            objLiq.dcCostRecepcion = c.dcRecepcion;
-            objLiq.dcCostClasificacion = c.dcClasificacion;
-            objLiq.dcCostCajas = c.dcCajas;
+            decimal cuLogistica = ObtenerUnitarioParticion(dicUnitariosParticion, "LOG", particion, c.dcLogistica);
+            decimal cuRecepcion = ObtenerUnitarioParticion(dicUnitariosParticion, "REC", particion, c.dcRecepcion);
+            decimal cuClasificacion = ObtenerUnitarioParticion(dicUnitariosParticion, "CLA", particion, c.dcClasificacion);
+
+            objLiq.ProcesoPrimario.dcLogistica = Math.Round(libras * cuLogistica, 4);
+            objLiq.ProcesoPrimario.dcRecepcion = Math.Round(libras * cuRecepcion, 4);
+            objLiq.ProcesoPrimario.dcClasificacion = Math.Round(libras * cuClasificacion, 4);
+            objLiq.ProcesoPrimario.dcCajas = Math.Round(libras * c.dcCajas, 4);
+        }
+
+        private static Dictionary<(string Pc, string Particion), decimal>ConstruirUnitariosFrescoParticion(DataProcesoParam objDataProceso)
+        {
+            var resultado = new Dictionary<(string Pc, string Particion), decimal>();
+            List<LiquidacionResultado> fresco = objDataProceso.lstLiqFresco ?? new();
+
+            decimal lbsEn = fresco
+                .Where(x => ParticionCosteo.ClasificarFrs(x.strProClas01, x.strProClas05) == ParticionCosteo.ENTERO)
+                .Sum(x => (decimal)x.dcLibras);
+            decimal lbsCo = fresco
+                .Where(x => ParticionCosteo.ClasificarFrs(x.strProClas01, x.strProClas05) == ParticionCosteo.COLA)
+                .Sum(x => (decimal)x.dcLibras);
+
+            foreach (CostoProcesoParticionDto item in objDataProceso.lstCostoProcesoParticion ?? new())
+            {
+                string pc = (item.strPcCodigo ?? string.Empty).Trim().ToUpperInvariant();
+                if (pc is not ("LOG" or "REC" or "CLA")) continue;
+
+                resultado[(pc, ParticionCosteo.ENTERO)] = lbsEn > 0m
+                    ? item.dcDolaresEntero / lbsEn : 0m;
+                resultado[(pc, ParticionCosteo.COLA)] = lbsCo > 0m
+                    ? item.dcDolaresCola / lbsCo : 0m;
+            }
+
+            return resultado;
+        }
+
+        private static decimal ObtenerUnitarioParticion(
+            IReadOnlyDictionary<(string Pc, string Particion), decimal> dic,
+            string pc,
+            string particion,
+            decimal fallback)
+        {
+            return dic.TryGetValue((pc, particion), out decimal valor) && valor != 0m
+                ? valor
+                : fallback;
         }
 
         private static void AplicarProcesoPresentacion(LiquidacionResultado liq, CostosUnitarios c)
         {
-            liq.ProcesoPresentacion.dcDecorado = Math.Round((decimal)liq.dcLibrasDecorado * c.dcDecorado, 4);
-            liq.ProcesoPresentacion.dcRetractilado = Math.Round((decimal)(liq.dcLibrasRetractilado ?? 0) * c.dcRetractilado, 4);
+            InfoProd objInfoProd = _dicInfoProd.GetValueOrDefault(liq.intCodProd.ToString(), null);
+            try
+            {
 
-            liq.dcCostDecorado = Math.Round(c.dcDecorado, 4);
-            liq.dcCostRectra = Math.Round(c.dcRetractilado, 4);
+                bool blDecorado = objInfoProd != null ? _hshListDecora.Contains(objInfoProd.intProDecora) : false;
+                bool blRetractilado = objInfoProd != null ? _hshListRetrac.Contains(objInfoProd.intProRetracti) : false;
+
+                if (objInfoProd != null)
+                {
+                    // Mismo patrón que Retractilado: libras propias del lote × tarifa
+                    // por embalaje (InfoProd.dcCostoDec, ya resuelta desde
+                    // tb_tarifaDecoradosRetractilado). Antes quedaba hardcodeado en 0
+                    // porque referenciaba InfoProd.dcCostoDecora, un campo que no existe.
+                    liq.ProcesoPresentacion.dcDecorado =
+                        blDecorado ? Math.Round((decimal)(liq.dcLibrasDecorado ?? 0) * objInfoProd.dcCostoDec, 4) : 0;
+
+                    liq.ProcesoPresentacion.dcRetractilado =
+                        blRetractilado ? Math.Round((decimal)(liq.dcLibrasRetractilado ?? 0) * objInfoProd.dcCostoRetrac , 4)
+                        : 0;
+                    liq.dcCostRectra = blRetractilado ? liq.ProcesoPresentacion.dcRetractilado : 0;
+                }
+                else
+                {
+                    liq.ProcesoPresentacion.dcDecorado = 0;
+                }
+
+                liq.dcCostDecorado = Math.Round(c.dcDecorado, 4);
+            }
+            catch (Exception obj)
+            {
+                _hshInfoProd.Add(objInfoProd);
+                Console.WriteLine(obj.Message+ obj.Source);
+            }
         }
 
 
@@ -673,6 +1047,7 @@ namespace CostManagement.Dominio.Reglas
         }
         private static decimal CalcularCostoTotal(LiquidacionResultado liq) =>
             // Proceso Primario
+            (liq.ProcesoPrimario.dcLogistica ?? 0) +
             (liq.ProcesoPrimario.dcRecepcion ?? 0) +
             (liq.ProcesoPrimario.dcClasificacion ?? 0) +
             (liq.ProcesoPrimario.dcCajas ?? 0) +
@@ -749,71 +1124,227 @@ namespace CostManagement.Dominio.Reglas
         /// ya reciba los valores con precisión completa, sin pasar por numeric(18,5) de BD.
         /// </summary>
         public void RecalcularCostosUnitariosExactos(
-            List<ProcesoResultadoDto> lstProcesoFrs,
-            List<ProcesoResultadoDto> lstProcesoRpc)
+    List<ProcesoResultadoDto> lstProcesoFrs,
+    List<ProcesoResultadoDto> lstProcesoRpc)
         {
-            // Construir lookup de FRS por descripción para acceso O(1)
-            var dictFrs = lstProcesoFrs
-                .Where(x => !string.IsNullOrWhiteSpace(x.strDescripcion))
-                .ToDictionary(
-                    x => x.strDescripcion.Trim(),
-                    x => x,
+            // ============================================================
+            // PROCESOS TARIFA
+            //
+            // Estos CU ya vienen determinados por tarifa.
+            // Este método NO debe alterarlos.
+            // ============================================================
+
+            var procesosTarifa =
+                new HashSet<string>(
+                    new[]
+                    {
+                "Descongelado"
+                    },
                     StringComparer.OrdinalIgnoreCase);
 
-            // Iterar sobre RPC y recalcular CU exacto para los no editables
-            foreach (var itemRPC in lstProcesoRpc.Where(x => !x.blEditable))
+
+            static string NormalizarDescripcion(
+                string? value)
             {
-                string desc = itemRPC.strDescripcion.Trim();
+                return value?.Trim() ??
+                    string.Empty;
+            }
 
-                dictFrs.TryGetValue(desc, out var itemFRS);
 
-                double librasFRS = (double)(itemFRS?.dcLibras ?? 0);
-                double librasRPC = (double)(itemRPC.dcLibras);
-                double librasTotal = librasFRS + librasRPC;
+            bool EsTarifa(
+                ProcesoResultadoDto item)
+            {
+                return procesosTarifa.Contains(
+                    NormalizarDescripcion(
+                        item.strDescripcion));
+            }
 
-                if (librasTotal == 0) continue;
 
-                double valorFRS = (double)(itemFRS?.dcValor ?? 0);
-                double valorRPC = (double)(itemRPC.dcValor);
-                double valorTotal = valorFRS + valorRPC;
+            // ============================================================
+            // LOOKUP PFR
+            // ============================================================
 
-                decimal cuExacto = (decimal)(valorTotal / librasTotal);
+            var dictFrs =
+                lstProcesoFrs
+                    .Where(x =>
+                        !string.IsNullOrWhiteSpace(
+                            x.strDescripcion))
+                    .GroupBy(
+                        x =>
+                            x.strDescripcion.Trim(),
+                        StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.First(),
+                        StringComparer.OrdinalIgnoreCase);
 
-                // Actualizar RPC
-                itemRPC.dcCostUnitario = cuExacto;
 
-                // Actualizar FRS con el mismo CU exacto
+            // ============================================================
+            // NO EDITABLES
+            //
+            // Compartir CU entre PFR/RPC SOLO si NO es tarifa.
+            // ============================================================
+
+            foreach (
+                var itemRPC
+                in lstProcesoRpc.Where(
+                    x => !x.blEditable))
+            {
+                // Descabezado / Descongelado conservan
+                // exclusivamente su tarifa original.
+                if (EsTarifa(itemRPC))
+                {
+                    continue;
+                }
+
+
+                string desc =
+                    NormalizarDescripcion(
+                        itemRPC.strDescripcion);
+
+
+                dictFrs.TryGetValue(
+                    desc,
+                    out var itemFRS);
+
+
+                decimal librasFRS =
+                    itemFRS?.dcLibras ??
+                    0m;
+
+
+                decimal librasRPC =
+                    itemRPC.dcLibras;
+
+
+                decimal librasTotal =
+                    librasFRS +
+                    librasRPC;
+
+
+                decimal valorFRS =
+                    itemFRS?.dcValor ??
+                    0m;
+
+
+                decimal valorRPC =
+                    itemRPC.dcValor;
+
+
+                decimal valorTotal =
+                    valorFRS +
+                    valorRPC;
+
+
+                decimal cuExacto =
+                    librasTotal > 0m
+                        ? valorTotal /
+                          librasTotal
+                        : 0m;
+
+
+                itemRPC.dcCostUnitario =
+                    cuExacto;
+
+
                 if (itemFRS != null)
-                    itemFRS.dcCostUnitario = cuExacto;
+                {
+                    itemFRS.dcCostUnitario =
+                        cuExacto;
+                }
             }
 
-            // Procesar procesos que solo existen en FRS (sin contraparte en RPC)
-            var descripcionesRpc = new HashSet<string>(
-                lstProcesoRpc.Select(x => x.strDescripcion.Trim()),
-                StringComparer.OrdinalIgnoreCase);
 
-            foreach (var itemFRS in lstProcesoFrs.Where(x => !x.blEditable
-                && !descripcionesRpc.Contains(x.strDescripcion.Trim())))
+            // ============================================================
+            // DESCRIPCIONES RPC
+            // ============================================================
+
+            var descripcionesRpc =
+                new HashSet<string>(
+                    lstProcesoRpc
+                        .Where(x =>
+                            !string.IsNullOrWhiteSpace(
+                                x.strDescripcion))
+                        .Select(x =>
+                            x.strDescripcion.Trim()),
+                    StringComparer.OrdinalIgnoreCase);
+
+
+            // ============================================================
+            // SOLO PFR
+            // ============================================================
+
+            foreach (
+                var itemFRS
+                in lstProcesoFrs.Where(
+                    x =>
+                        !x.blEditable &&
+                        !descripcionesRpc.Contains(
+                            x.strDescripcion.Trim())))
             {
-                if (itemFRS.dcLibras == 0) continue;
-                itemFRS.dcCostUnitario = itemFRS.dcValor / itemFRS.dcLibras;
+                // Una tarifa jamás se recalcula aquí.
+                if (EsTarifa(itemFRS))
+                {
+                    continue;
+                }
+
+
+                itemFRS.dcCostUnitario =
+                    itemFRS.dcLibras > 0m
+                        ? itemFRS.dcValor /
+                          itemFRS.dcLibras
+                        : 0m;
             }
 
 
-            // ── EDITABLES: CU = dcValor / dcLibras propio, sin mezclar FRS y RPC ──
-            // Cada registro editable es independiente — su CU corresponde
-            // únicamente a su propio valor y sus propias libras.
-            foreach (var itemRPC in lstProcesoRpc.Where(x => x.blEditable))
+            // ============================================================
+            // EDITABLES RPC
+            // ============================================================
+
+            foreach (
+                var itemRPC
+                in lstProcesoRpc.Where(
+                    x => x.blEditable))
             {
-                if (itemRPC.dcLibras == 0) continue;
-                itemRPC.dcCostUnitario = itemRPC.dcValor / itemRPC.dcLibras;
+                if (EsTarifa(itemRPC))
+                {
+                    continue;
+                }
+
+
+                itemRPC.dcCostUnitario =
+                    itemRPC.dcLibras > 0m
+                        ? itemRPC.dcValor /
+                          itemRPC.dcLibras
+                        : 0m;
             }
 
-            foreach (var itemFRS in lstProcesoFrs.Where(x => x.blEditable))
+
+            // ============================================================
+            // EDITABLES PFR
+            // ============================================================
+
+            foreach (
+                var itemFRS
+                in lstProcesoFrs.Where(
+                    x => x.blEditable))
             {
-                if (itemFRS.dcLibras == 0) continue;
-                itemFRS.dcCostUnitario = itemFRS.dcValor / itemFRS.dcLibras;
+                if (EsTarifa(itemFRS))
+                {
+                    continue;
+                }
+
+
+                itemFRS.dcCostUnitario =
+                    itemFRS.dcLibras > 0m
+                        ? itemFRS.dcValor /
+                          itemFRS.dcLibras
+                        : 0m;
             }
+
+            // BLOQUE TEMPORAL DE DEBUG (DESCABEZADO CU CONSOLIDADO) — mantener comentado.
+            //var lstDebugFrs = lstProcesoFrs.Where(x => x.strDescripcion == "Descabezado").ToList();
+            //var lstDebugRpc = lstProcesoRpc.Where(x => x.strDescripcion == "Descabezado").ToList();
         }
         #endregion
     }

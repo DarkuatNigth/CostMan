@@ -1,8 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using CostManagement.Infraestructura.EF_Core;
+﻿using CostManagement.Infraestructura.EF_Core;
 using CostManagementService.Infraestructura.EF_Core;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
 
 namespace CostManagement.Infraestructura.DBContext;
 
@@ -37,7 +37,13 @@ public partial class CostosDbContext : DbContext
 
     public virtual DbSet<TbProcesoCosteo> TbProcesoCosteo { get; set; }
 
+    public virtual DbSet<TbTarifaDecoradosRetractilado> TbTarifaDecoradosRetractilado { get; set; }
 
+    public virtual DbSet<TbTarifaProceso> TbTarifaProceso { get; set; }
+
+    public virtual DbSet<TbDistribucionCosto> TbDistribucionCosto { get; set; }
+
+    public virtual DbSet<TbDistribucionProcesoProductivo> TbDistribucionProcesoProductivo { get; set; }
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -146,6 +152,39 @@ public partial class CostosDbContext : DbContext
             entity.Property(e => e.McEquipoCrea).HasDefaultValueSql("(host_name())");
             entity.Property(e => e.McFechaCrea).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.McId).ValueGeneratedOnAdd();
+        });
+
+        modelBuilder.Entity<TbTarifaDecoradosRetractilado>(entity =>
+        {
+            entity.Property(e => e.TrEmbCodigo).HasComment("Codigo de embalaje. Ref SVRSNG04.PRODUCCION.dbo.tb_embala");
+            entity.Property(e => e.TrEmbPeso).HasComment("Peso del embalaje. Ref SVRSNG04.PRODUCCION.dbo.tb_embala");
+            entity.Property(e => e.TrMedCodigo).HasComment("Codigo de la unidad de medida. Ref SVRSNG04.PRODUCCION.dbo.tb_medida");
+        });
+
+        modelBuilder.Entity<TbTarifaProceso>(entity =>
+        {
+            entity.Property(e => e.TpEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.TpFechaCrea).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.TpId).ValueGeneratedOnAdd();
+        });
+
+        modelBuilder.Entity<TbDistribucionCosto>(entity =>
+        {
+            entity.Property(e => e.DpEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.DpFechaCrea).HasDefaultValueSql("(getdate())");
+        });
+
+        modelBuilder.Entity<TbDistribucionProcesoProductivo>(entity =>
+        {
+            entity.ToTable(
+                "tb_distribucionProcesoProductivo",
+                "costos");
+
+            entity.Property(e => e.DpFechaCrea)
+                .HasDefaultValueSql("(getdate())");
+
+            entity.Property(e => e.DpEquipoCrea)
+                .HasDefaultValueSql("(host_name())");
         });
 
         OnModelCreatingPartial(modelBuilder);

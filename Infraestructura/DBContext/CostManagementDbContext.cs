@@ -2,6 +2,7 @@
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Utils;
+using CostManagementService.Infraestructura.EF_Core;
 using CostManagementService.Dominio.Entidades;
 using CostManagementService.Infraestructura.EF_Core.SONG;
 using Microsoft.EntityFrameworkCore;
