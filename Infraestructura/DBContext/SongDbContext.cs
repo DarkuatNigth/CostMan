@@ -1,6 +1,8 @@
 ﻿using CostManagement.Aplicación.DTos;
 using CostManagement.Infraestructura.EF_Core.SONG;
 using CostManagement.Infraestructura.Utils;
+using CostManagementService.Infraestructura.EF_Core;
+using DocumentFormat.OpenXml.Vml.Office;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -44,6 +46,7 @@ public partial class SongDbContext : DbContext
 
     public virtual DbSet<TbDatfac> TbDatfac { get; set; }
 
+    public virtual DbSet<TbMaecta> TbMaecta { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -680,6 +683,31 @@ public partial class SongDbContext : DbContext
             entity.Property(e => e.DfaTipo).IsFixedLength();
         });
 
+        modelBuilder.Entity<TbMaecta>(entity =>
+        {
+            entity.HasIndex(e => e.CtaNumero, "IX_tb_maecta_cta_numero").HasFillFactor(100);
+
+            entity.HasIndex(e => e.CtaClave, "UX_tb_maecta_cta_clave")
+                .IsUnique()
+                .HasFilter("([cta_nivel]='5')")
+                .HasFillFactor(100);
+
+            entity.Property(e => e.CtaCodcia).IsFixedLength();
+            entity.Property(e => e.CtaNumero).IsFixedLength();
+            entity.Property(e => e.CtaCodaut).IsFixedLength();
+            entity.Property(e => e.CtaEstado).IsFixedLength();
+            entity.Property(e => e.CtaFecini).IsFixedLength();
+            entity.Property(e => e.CtaFluefe).IsFixedLength();
+            entity.Property(e => e.CtaGrupo).IsFixedLength();
+            entity.Property(e => e.CtaIndfin).IsFixedLength();
+            entity.Property(e => e.CtaNatura).IsFixedLength();
+            entity.Property(e => e.CtaRelaci).IsFixedLength();
+            entity.Property(e => e.CtaSaluni).IsFixedLength();
+            entity.Property(e => e.CtaSubgrupo).IsFixedLength();
+            entity.Property(e => e.CtaTermin).IsFixedLength();
+            entity.Property(e => e.CtaTipact).IsFixedLength();
+            entity.Property(e => e.CtaTipcta).IsFixedLength();
+        });
 
         modelBuilder
             .Entity<CostoMatEmpaDto>()

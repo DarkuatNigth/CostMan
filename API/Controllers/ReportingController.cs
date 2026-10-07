@@ -183,6 +183,48 @@ namespace CostManagement.API.Controllers
         }
 
 
+
+        [HttpGet("material-empaque-auditoria")]
+        public async Task<IActionResult> AuditarCostoMaterialEmpaque(
+            DateOnly dtFechaInicio,
+            DateOnly dtFechaFin,
+            string? strProducto = null,
+            int? intLote = null,
+            bool blSoloErrores = false)
+        {
+            try
+            {
+                var resultado = await _objCostoMateriaPrima.AuditarMaterialEmpaque(
+                    dtFechaInicio,
+                    dtFechaFin,
+                    strProducto,
+                    intLote,
+                    blSoloErrores);
+
+                var dtResult = new DataTablesResultDto
+                {
+                    Table = resultado.lstResumen.AListaDeDiccionarios(),
+                    Table1 = resultado.lstDetalle.AListaDeDiccionarios()
+                };
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Auditoría de material de empaque ejecutada correctamente",
+                    objData = dtResult
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error en auditoría de material de empaque: " + ex.Message,
+                    objData = ""
+                });
+            }
+        }
+
         [HttpGet("materia-prima-repro")]
         public async Task<IActionResult> ObtenerCostoMateriaPrimaRepro(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
@@ -439,8 +481,9 @@ namespace CostManagement.API.Controllers
             {
 
                 var lstResult =
-                    await _objOperacionComercial.ConsultarCostoVentaUni(dtFechaInicio, dtFechaFin);
-                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+                    await _objOperacionComercial.ConsultarCostoVentaUniDisponible(dtFechaInicio, dtFechaFin);
+                //_objOperacionComercial.ConsultarCostoVentaUni(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult.lstDisponibleLote, 0);
 
                 return Ok(new ApiResponse<DataTablesResultDto>
                 {
@@ -449,6 +492,40 @@ namespace CostManagement.API.Controllers
                     objData = dtResult
                 });
 
+            }
+            catch (Exception objException)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error al obtener la informacion: " + objException.Message,
+                    objData = ""
+                });
+            }
+        }
+
+
+        /// <summary>
+        /// DIAGNÓSTICO TEMPORAL — investigación puntual del lote 187165 /
+        /// CodProd 6550 / Talla 26/30 en Costo de Venta Unitario. Candidato a
+        /// eliminar una vez cerrada la investigación.
+        /// </summary>
+        [HttpGet("diagnostico-disponible-lote")]
+        public async Task<IActionResult> DiagnosticoDisponibleLote(
+            DateOnly dtFechaInicio, DateOnly dtFechaFin,
+            int intLote, int intCodProd, string strTalla)
+        {
+            try
+            {
+                object objResultado = await _objOperacionComercial.DiagnosticoDisponibleLote(
+                    dtFechaInicio, dtFechaFin, intLote, intCodProd, strTalla);
+
+                return Ok(new ApiResponse<object>
+                {
+                    blStatus = true,
+                    strMensaje = "Consulta ejecutada correctamente",
+                    objData = objResultado
+                });
             }
             catch (Exception objException)
             {
@@ -535,9 +612,62 @@ namespace CostManagement.API.Controllers
                         dataTable =  obj.ADataTable();
                         break;
 
+                    case "costo-productivo":
+                        {
+
+                            CostoProductivoResultadoDto resultado =
+                                await _objOperacionComercial.ObtenerCostoProductivo(
+                                    fechaInicio.Year,
+                                    fechaInicio.Month);
+
+                            List<CostoProductivoExcelDto> filas =
+                                resultado.lstCuentas
+                                    .Select(CostoProductivoExcelDto.Crear)
+                                    .ToList();
+
+                            if (filas.Count == 0)
+                            {
+                                throw new InvalidOperationException(
+                                    "No existen datos para exportar.");
+                            }
+
+                            dataTable = filas.ADataTable();
+                            request.columnas = CostoProductivoExcelDto.Columnas;
+
+                            break;
+                        }
+
+                    case "diarios-cierre":
+                        {
+                            DiariosCierreDto objCierre =
+                                await _objCostoMateriaPrima
+                                    .ConsultarDiariosCierre(
+                                        fechaInicio.Year,
+                                        fechaInicio.Month);
+
+                            if (objCierre == null)
+                            {
+                                throw new InvalidOperationException(
+                                    "No se obtuvo información de diarios para el período.");
+                            }
+
+                            excelBytes =
+                                await _excelService
+                                    .DataDiariosCierreExcel(
+                                        request,
+                                        objCierre);
+
+                            break;
+                        }
+
                     case "costo-venta-uni":
-                        var objCostVen = await _objOperacionComercial.ConsultarCostoVentaUni(fechaInicio, fechaFin);
-                        dataTable = objCostVen.ADataTable();
+                        // CONTENIDO ANTERIOR (disponible por lote), reemplazado por el Excel de dos hojas: Disponible (CodProd + Talla) y Detallado.
+                        //var objCostVen = await _objOperacionComercial.ConsultarCostoVentaUniDisponible(fechaInicio, fechaFin);
+                        //dataTable = objCostVen.lstDisponibleLote.ADataTable();
+                        //var objCostVen = await _objOperacionComercial.ConsultarCostoVentaUni(fechaInicio, fechaFin);
+                        //dataTable = objCostVen.ADataTable();
+                        var objHojas = await _objOperacionComercial.ConsultarCostoVentaUniHojas(fechaInicio, fechaFin);
+                        excelBytes = await _excelService.DataGeneralExcelHojas(request, new List<(string, DataTable)> { ("Disponible", objHojas.lstDisponible.ADataTable()), ("Detallado", objHojas.lstDetalle.ADataTable()) });
                         break;
 
                     default:

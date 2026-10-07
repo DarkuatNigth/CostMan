@@ -1,5 +1,6 @@
 ﻿using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
+using CostManagementService.Infraestructura.EF_Core;
 using DocumentFormat.OpenXml.Office2016.Excel;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
@@ -112,14 +113,18 @@ namespace CostManagement.Aplicación.DTos
             List<LiquidacionResultado> lst)
         {
             if (!lst.Any()) return new ConcurrentDictionary<PromLoteXProdTal, decimal>();
-            return new ConcurrentDictionary<PromLoteXProdTal, decimal>(
-                (from frs in lst
-                 group frs by new
-                 { frs.intLote, frs.intCodProd, frs.intLidCodTal } into g
-                 select g.First()).ToDictionary(
-                                   frs => new PromLoteXProdTal(frs.intLote, frs.intCodProd.ToString().Trim(), (int)frs.intLidCodTal),
-                                   frs => (decimal)frs.dcCostoTotXLibra)
-                    );
+            // Anterior: reemplazado para valorar desde totales sin perder precisión.
+            // return new ConcurrentDictionary<PromLoteXProdTal, decimal>(
+            //     (from frs in lst
+            //      group frs by new
+            //      { frs.intLote, frs.intCodProd, frs.intLidCodTal } into g
+            //      select g.First()).ToDictionary(
+            //                        frs => new PromLoteXProdTal(frs.intLote, frs.intCodProd.ToString().Trim(), (int)frs.intLidCodTal),
+            //                        frs => (decimal)frs.dcCostoTotXLibra)
+            //         );
+            return new ConcurrentDictionary<PromLoteXProdTal, decimal>(lst
+                .GroupBy(x => new PromLoteXProdTal(x.intLote, x.intCodProd.ToString().Trim(), (int)x.intLidCodTal)).ToDictionary(g => g.Key,
+                    g => g.Sum(x => (decimal)x.dcLibras) == 0m ? 0m : g.Sum(x => x.dcTotalCostoWarren ?? x.dcTotalDolSum) / g.Sum(x => (decimal)x.dcLibras)));
         }
 
 
@@ -148,15 +153,19 @@ namespace CostManagement.Aplicación.DTos
             List<MatPrimaReproceso> lst)
         {
             if (!lst.Any()) return new ConcurrentDictionary<PromLoteXProdTal, decimal>();
-            return new ConcurrentDictionary<PromLoteXProdTal, decimal>(
-                (from rpc in lst
-                 group rpc by new
-                 { rpc.intLoteUnificado, rpc.intCodProd, rpc.intCodTal } into g
-                 select g.First())
-                .ToDictionary(
-                    frs => new PromLoteXProdTal(frs.intLoteUnificado, frs.intCodProd.ToString().Trim(), (int)frs.intCodTal),
-                    frs => (decimal)frs.dcCostoTotXLibra)
-            );
+            // Anterior: reemplazado para valorar desde totales sin perder precisión.
+            // return new ConcurrentDictionary<PromLoteXProdTal, decimal>(
+            //     (from rpc in lst
+            //      group rpc by new
+            //      { rpc.intLoteUnificado, rpc.intCodProd, rpc.intCodTal } into g
+            //      select g.First())
+            //     .ToDictionary(
+            //         frs => new PromLoteXProdTal(frs.intLoteUnificado, frs.intCodProd.ToString().Trim(), (int)frs.intCodTal),
+            //         frs => (decimal)frs.dcCostoTotXLibra)
+            // );
+            return new ConcurrentDictionary<PromLoteXProdTal, decimal>(lst.Where(x => x.strAgrupacion == "2. PROCESADO")
+                .GroupBy(x => new PromLoteXProdTal(x.intLoteUnificado, x.intCodProd.ToString().Trim(), x.intCodTal)).ToDictionary(g => g.Key,
+                    g => g.Sum(x => (decimal)x.dbLibras) == 0m ? 0m : g.Sum(x => x.dcTotalDolSum) / g.Sum(x => (decimal)x.dbLibras)));
         }
 
         /// <summary>Costo promedio ponderado por prod+talla — fuente RPC (para exportaciones).</summary>
@@ -432,6 +441,10 @@ namespace CostManagement.Aplicación.DTos
             d.intLote,
             d.stTalCodigo,
             d.strProClas01,
+            // La clave conserva clase, proceso y congelamiento del inventario.
+            d.strProClas02,
+            d.strProClas03,
+            d.strCongelInv,
             d.strProClas05,
             d.strProdDescri,
             d.strProDesesp,
@@ -447,6 +460,9 @@ namespace CostManagement.Aplicación.DTos
                 intLote = g.Key.intLote,
                 stTalCodigo = g.Key.stTalCodigo,
                 strProClas01 = g.Key.strProClas01,
+                strProClas02 = g.Key.strProClas02,
+                strProClas03 = g.Key.strProClas03,
+                strCongel = g.Key.strCongelInv,
                 strProClas05 = g.Key.strProClas05,
                 strProdDescri = g.Key.strProdDescri,
                 strProDesesp = g.Key.strProDesesp,
@@ -468,6 +484,33 @@ namespace CostManagement.Aplicación.DTos
         .ToList();
 
             return lstInventario;
+        }
+
+        // Anterior: reemplazado para valorar desde totales sin perder precisión.
+        // public static Dictionary<LoteFrsKey, decimal> GenerarDiccionarioCostoXTalla(IEnumerable<InventarioVal> lstInval)
+        public static Dictionary<LoteFrsKey, decimal> GenerarDiccionarioCostoXTalla(IEnumerable<InventarioVal> lstInval, ILogger? objLogger = null)
+        {
+            if (lstInval == null)
+                return new Dictionary<LoteFrsKey, decimal>();
+
+            // Anterior: reemplazado para valorar desde totales sin perder precisión.
+            // return (
+            //                 from lct in lstInval
+            //                 group new { lct } by new
+            //                 {
+            //                     lct.objLotkey
+            //                 } into g
+            //                 select new
+            //                 {
+            //                     Key = g.Key.objLotkey,
+            //                     PrecioPromedio = g.Average(x => x.lct.dcCostoUnit)
+            //                 }
+            //             ).ToDictionary(x => x.Key, x => x.PrecioPromedio);
+            var lstGrupos = lstInval.Where(x => x.objLotkey != null).GroupBy(x => x.objLotkey).ToList();
+            DiagnosticoPrecision.Diccionario(objLogger, "DiccionarioINV", lstGrupos.Count,
+                lstGrupos.Count(g => DiagnosticoPrecision.EsUnitarioDosDecimales(g.Average(x => x.dcCostoUnit))));
+            return lstGrupos.ToDictionary(g => g.Key, g => g.Sum(x => x.dcLibras) == 0m
+                ? g.Average(x => x.dcCostoUnit) : Math.Round(g.Sum(x => x.dcCostoTot) / g.Sum(x => x.dcLibras), 4));
         }
 
         public void InicializarCampos(InfoProd objProd, string TalDescri)
@@ -543,7 +586,9 @@ namespace CostManagement.Aplicación.DTos
                     .GroupBy(x => x.objLotkey)
                     .ToDictionary(
                         g => g.Key,
-                        g => g.First().dcCostoUnit
+                        // Anterior: g => g.First().dcCostoUnit; se conserva la precisión del total.
+                        g => g.Sum(x => x.dcLibras) == 0m ? g.Average(x => x.dcCostoUnit)
+                            : Math.Round(g.Sum(x => x.dcCostoTot) / g.Sum(x => x.dcLibras), 4)
                     )
                 );
             }
@@ -570,6 +615,9 @@ namespace CostManagement.Aplicación.DTos
 
         [Column("Lote")]
         public int intLote { get; set; }
+
+        [JsonIgnore]
+        public int? intLoteOrigen { get; set; }
 
         [Column("CodProd")]
         public int intCodProd { get; set; }
@@ -610,6 +658,9 @@ namespace CostManagement.Aplicación.DTos
         [Column("Descripcion Movimiento")]
         public string strDescriMov { get; set; }
 
+        [Column("Cod Movimiento")]
+        public string? strCodMov { get; set; }
+
         [JsonIgnore]
         public LoteFrsKey objLoteProdTalKey { get; set; }
 
@@ -639,8 +690,13 @@ namespace CostManagement.Aplicación.DTos
                 strClase = objLiqFrs.strProClas02;
                 strCongelamiento = Convert.ToString(objLiqFrs.intProCongela);
                 dcLibras = (decimal)objLiqFrs.dcLibras;
-                dcCostoUnit = (decimal)objLiqFrs.dcCostoTotXLibra;
-                dcCostoTot = (decimal)objLiqFrs.dcTotalDolSum;
+                // ANTERIOR (costo normal PFR), reemplazado por costo Warren con respaldo normal:
+                //dcCostoUnit = (decimal)objLiqFrs.dcCostoTotXLibra;
+                //dcCostoTot = (decimal)objLiqFrs.dcTotalDolSum;
+                // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                // dcCostoUnit = objLiqFrs.dcCostoTotXLibraWarren ?? objLiqFrs.dcCostoTotXLibra ?? 0m;
+                dcCostoUnit = dcLibras == 0m ? 0m : Math.Round((objLiqFrs.dcTotalCostoWarren ?? objLiqFrs.dcTotalDolSum) / dcLibras, 4);
+                dcCostoTot = objLiqFrs.dcTotalCostoWarren ?? objLiqFrs.dcTotalDolSum;
                 objLoteProdTalKey = new LoteFrsKey(intLote, intCodProd, intCodTalla);
             }
             catch (Exception ex)
@@ -681,6 +737,7 @@ namespace CostManagement.Aplicación.DTos
                 strTipoLiq = objLiqRpc.strTipDescri;
                 intLoteUni = objLiqRpc.intLotNumero;
                 intLote = objLiqRpc.intLoteUnificado;
+                intLoteOrigen = objLiqRpc.intLoteOrigen;
                 intCodProd = (int)objLiqRpc.intCodProd;
                 strDescripcion = objLiqRpc.strDescriProduc;
                 strTalla = objLiqRpc.strTalDescri;
@@ -691,9 +748,12 @@ namespace CostManagement.Aplicación.DTos
                 strClase = objLiqRpc.strClaseProd;
                 dcLibras = objLiqRpc.strAgrupacion == "2. PROCESADO" ? (decimal)objLiqRpc.dbLibras :
                     -(decimal)objLiqRpc.dbLibras;
-                dcCostoUnit = objLiqRpc.strAgrupacion == "2. PROCESADO" ? 
-                    (decimal)objLiqRpc.dcCostoTotXLibra : 
-                    (decimal)objLiqRpc.dbCostoXSecuencial;
+                // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                // dcCostoUnit = objLiqRpc.strAgrupacion == "2. PROCESADO" ?
+                //     (decimal)objLiqRpc.dcCostoTotXLibra :
+                //     (decimal)objLiqRpc.dbCostoXSecuencial;
+                dcCostoUnit = objLiqRpc.strAgrupacion == "2. PROCESADO"
+                    ? (dcLibras == 0m ? 0m : Math.Round(objLiqRpc.dcTotalDolSum / dcLibras, 4)) : objLiqRpc.dbCostoXSecuencial;
                 dcCostoTot = objLiqRpc.strAgrupacion == "2. PROCESADO" ?  
                     (decimal)objLiqRpc.dcTotalDolSum :
                     -(decimal)objLiqRpc.dbCostoTotal;
@@ -762,6 +822,7 @@ namespace CostManagement.Aplicación.DTos
                 dcCostoUnit = (decimal)objMovInven.dcCostoUnit;
                 dcCostoTot = (decimal)objMovInven.dcCostoTot;
                 strDescriMov = objMovInven.strDescri;
+                strCodMov = objMovInven.strProCod;
             }
             catch (Exception ex)
             {
@@ -793,16 +854,80 @@ namespace CostManagement.Aplicación.DTos
 
     public class InfoProd
     {
-
+        private static readonly HashSet<int> _hshListDecora = new HashSet<int> { 2, 3 };
+        private static readonly HashSet<int> _hshListRetrac = new HashSet<int> { 3, 4 };
+        private static readonly Dictionary<double, int> _dicHomologaLbs = new Dictionary<double, int> { { 1, 1000 } };
+        private static readonly Dictionary<string, decimal> _dicHomologaTarLLena = new Dictionary<string, decimal> { { "5412", 0.0443m } };
         public string strProCodcor { get; set; }
         public string strProDesesp { get; set; }
         public string strProClas01 { get; set; }
-        public string strProClas02 { get; set; }
+        public string? strProClas02 { get; set; }
         public string strProClas03 { get; set; }
+        public string strCodTipProc { get; set; }
         public string strProClas05 { get; set; }
         public string strProCodigo { get; set; }
-        public string strProDescri { get; set; }
-        public string strDprDescri { get; set; }
+        public string? strProDescri { get; set; }
+        public string? strDprDescri { get; set; }
+        public string strEmbCodigo { get; set; }
+        public int intEmbPeso { get; set; }
+        public int intMedCodigo { get; set; }
+        public int intProDecora { get; set; }
+        public int intProRetracti { get; set; }
+        public decimal dcCostoRetrac { get; set; }
+        public decimal dcCostoDec { get; set; }
+        public decimal dcCostoPelado { get; set; }
+
+        public List<TbTarifaProceso> lstTarPelado { get; set; }
+
+        public InfoProd()
+        {
+
+        }
+
+        public InfoProd(TbProduc pro, TbProces proc, string? DprDescri, TbEmbala emb, decimal medCodigo,
+            List<TbTarifaDecoradosRetractilado> lstTarDecRec,
+            List<TbTarifaProceso> TarPelado)
+        {
+            strProCodcor = pro.ProCodcor.Trim();
+            if (strProCodcor == "7052")
+            {
+                strProCodcor = pro.ProCodcor.Trim();
+            }
+            strProDesesp = pro.ProDesesp;
+            strProClas01 = pro.ProClas01;
+            strProClas02 = pro.ProClas02;
+            strProClas03 = pro.ProClas03;
+            strProClas05 = pro.ProClas05;
+            strProCodigo = pro.ProCodigo;
+            strCodTipProc = proc?.ProTiplot != null ? proc?.ProTiplot.Trim() : null;
+            intProDecora = (int)pro.ProDecora;
+            intProRetracti = (int)pro.ProRetrac;
+            strProDescri = proc?.ProDescri;
+            strDprDescri = DprDescri;
+            strEmbCodigo = emb.EmbCodigo.Trim();
+            intEmbPeso = _dicHomologaLbs.GetValueOrDefault(emb.EmbPeso, (int)emb.EmbPeso);
+                //(int)emb.EmbPeso == 1 ? (int)(emb.EmbPeso* 1000) : (int)emb.EmbPeso;
+            intMedCodigo = (int)medCodigo;
+            TbTarifaDecoradosRetractilado? objTar = lstTarDecRec.FirstOrDefault(t => /*t.TrMedCodigo == this.intMedCodigo && t.TrEmbPeso == this.intEmbPeso &&*/ t.TrEmbCodigo == this.strEmbCodigo);
+            
+            if (objTar != null)
+            {
+                decimal dcCostoDeco = _dicHomologaTarLLena.GetValueOrDefault(strProCodcor, objTar?.TrDecorado ?? 0);
+                decimal dcCostoRetrac = objTar?.TrRetractilado ?? 0;
+                this.dcCostoDec = dcCostoDeco ;
+                this.dcCostoRetrac = dcCostoRetrac ;
+                //this.dcCostoDec = Math.Round(dcCostoDeco / 2.2046m,4);
+                //this.dcCostoRetrac = Math.Round(dcCostoRetrac / 2.2046m, 4);
+            }
+            if (TarPelado.Where(t => t.TpTipoProceso == this.strCodTipProc).ToList() != null)
+            {
+                lstTarPelado = TarPelado.Where(t => t.TpTipoProceso == this.strCodTipProc).ToList();
+            }
+            else
+            {
+                lstTarPelado = null;
+            }
+        }
 
     }
 

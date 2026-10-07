@@ -50,6 +50,7 @@ namespace CostManagementService.Dominio.Reglas
                 foreach (var e in dictEnumeradores.Values) e.Dispose();
             }
 
+            DiagnosticoPrecision.Liquidaciones(_objLogger, "MergeFresco", lstFrescoCrudo);
             _objLogger.LogInformation(
                 "[MotorMergeValorizacion.MergeFresco] {Mergeados}/{Total} registros fresco valorizados desde cache.",
                 intMergeados, lstFrescoCrudo.Count);
@@ -92,6 +93,7 @@ namespace CostManagementService.Dominio.Reglas
                 foreach (var e in dictEnumeradores.Values) e.Dispose();
             }
 
+            DiagnosticoPrecision.Reproceso(_objLogger, "MergeRepro", lstReproValorizado);
             //_objLogger.LogInformation(
             //    "[MotorMergeValorizacion.MergeRepro] {Mergeados}/{Total} registros RPC valorizados desde cache.",
             //    intMergeados, lstRpcCrudo.Count);

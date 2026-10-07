@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.DependencyModel;
+﻿using CostManagement.Aplicación.DTos;
+using CostManagement.Infraestructura.EF_Core;
+using Microsoft.Extensions.DependencyModel;
 using Newtonsoft.Json;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -41,6 +43,24 @@ namespace CostManagement.Dominio.Entidades
         [Column("Congelamiento Producto")]
         public string strCongeProduc { get; set; }
 
+        [Column("Tipo Pelado")]
+        public string? strTipoPelado { get; set; }
+
+        [Column("Maquina Pelado")]
+        public string? strMaquinaPelado { get; set; }
+
+        [Column("Bod Congela")]
+        public string strBodCongela { get; set; }
+
+        [Column("Tip Embala")]
+        public string strTipEmbala { get; set; }
+
+        [Column("lid_clasificadora")]
+        public string? strLidClasificadora { get; set; }
+
+        [Column("Clasificadora")]
+        public string? strClasificadora { get; set; }
+
         [Column("LoteOrigen")]
         public int intLoteOrigen { get; set; }
 
@@ -77,9 +97,14 @@ namespace CostManagement.Dominio.Entidades
         [Column("Libras")]
         public double dbLibras { get; set; }
 
-        [JsonIgnore]
         [Column("Libras Pelado")]
         public decimal? dcLibrasPelado { get; set; }
+
+        [Column("EsDescongelado")]
+        public bool? blEsDescongelado { get; set; }
+
+        [Column("Libras Retractilado")]
+        public decimal? dcLibrasRetractilado { get; set; }
 
         [Column("Rendimiento %")]
         public double dbRendimiento { get; set; }
@@ -89,10 +114,6 @@ namespace CostManagement.Dominio.Entidades
 
         [Column("Certificado")]
         public string? strCertificado { get; set; }
-
-        //[JsonIgnore]
-        [Column("Libras Retractilado")]
-        public decimal? dcLibrasRetractilado { get; set; }
 
         [Column("Costo X Secuencial")]
         public decimal dbCostoXSecuencial { get; set; }
@@ -225,6 +246,9 @@ namespace CostManagement.Dominio.Entidades
         public decimal? dcCajas { get; set; }
 
         [JsonIgnore]
+        public decimal? dcDescongelado { get; set; }
+
+        [JsonIgnore]
         public decimal? dcDescabezado { get; set; }
 
         [JsonIgnore]
@@ -330,6 +354,14 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         public LoteRpcKeyReci objRpcValOrKey { get; set; }
 
+        [NotMapped]
+        [JsonIgnore]
+        public LoteFrsKey objFrskey { get; set; }
+
+        [NotMapped]
+        [JsonIgnore]
+        public InfoProd objInfoProd { get; set; }
+
         #region Constructor
         public MatPrimaReproceso() { }
 
@@ -341,9 +373,10 @@ namespace CostManagement.Dominio.Entidades
                 DateTime? lotFecha, string prodCod, string descriProduc, string talDescri,
                 double libras, string agrupacion, int codTal, string recTipo, string recNombre, bool pelado,
                 bool decorado, bool retractilado, string ProClas03, string Certificado, decimal? Premio,
-                decimal? RecPorHid, decimal? RecPorcSal, decimal? RtCodItem, decimal? lbsRetractilado,double? PesoPelado, string BodCod,
+                decimal? RecPorHid, decimal? RecPorcSal, decimal? RtCodItem, decimal? lbsRetractilado,double? PesoPelado, string TipoPelado, string MaquinaPelado,
+                string BodCod, string BodDescri,
                 string EmbCodigo, decimal MedCodigo, double CantCaja, bool? bodEsBrine, decimal? RtaCodigo, decimal? TidCodigo, bool esDescabezado, decimal? proCongela,
-                decimal? PorSal, decimal? PorHid
+                decimal? PorSal, decimal? PorHid, string LidClasificadora, string Clasificadora, string TipEmbala
             )
         {
             try
@@ -354,7 +387,7 @@ namespace CostManagement.Dominio.Entidades
                 strTipDescri = tipDescri.Trim();
                 strClaseProd = claseProd;
                 strLotTipo = lotTipo;
-                intCodCopacking = Convert.ToInt32(CodCopacking);
+                intCodCopacking = !String.IsNullOrWhiteSpace(CodCopacking) ? Convert.ToInt32(CodCopacking) : 0;
                 strTipoCopacking = tipoCopacking;
                 intLotNumero = (int)lotNumero;
                 intLoteUnificado = (int)loteUnificado;
@@ -378,7 +411,7 @@ namespace CostManagement.Dominio.Entidades
                 strRecNombre = recNombre;
                 blPelado = pelado;
                 blDecorado = decorado;
-                blRetractilado = retractilado;
+                blRetractilado = (int)RtaCodigo.Value > 2 && strLotTipo == "VA" ? true : false ;
                 strProClas03 = ProClas03;
                 strCertificado = Certificado;
                 InitializerCostPremio(Premio);
@@ -391,16 +424,22 @@ namespace CostManagement.Dominio.Entidades
                 dcCthHidlbs = RecPorHid;
                 intRtCodItem = RtCodItem.HasValue ? (int)RtCodItem.Value : null;
                 dcLibrasPelado = PesoPelado != null && pelado  ? (decimal)/*dbLibras*/PesoPelado : 0m;
-                dcLibrasRetractilado = lbsRetractilado != null && retractilado ? (decimal)lbsRetractilado/*lbsRetractilado.Value */: 0m;
+                dcLibrasRetractilado = 0m;//lbsRetractilado != null && retractilado ? (decimal)lbsRetractilado/*lbsRetractilado.Value */: 0m;
                 strBodCod = BodCod;
+                strBodCongela = BodDescri;
                 strEmbCodigo = EmbCodigo;
                 intMedCodigo = (int)MedCodigo;
                 dbMasters = CantCaja;
                 blBodEsBrine = bodEsBrine ?? false;
-                intRtaCodigo = RtaCodigo.HasValue ? (int)RtaCodigo.Value : null;
-                intTidCodigo = TidCodigo.HasValue ? (int)TidCodigo.Value : null;
+                intRtaCodigo = (int)RtaCodigo.Value;
+                intTidCodigo = (int)TidCodigo.Value;
                 blEsDescabezado = esDescabezado && lstTiplot.Contains(strTipCod) ? true : false;
                 intProCongela = proCongela.HasValue ? (int)proCongela.Value : 0;
+                strClasificadora = Clasificadora;
+                strLidClasificadora = LidClasificadora;
+                strTipoPelado = TipoPelado;
+                strMaquinaPelado = MaquinaPelado;
+                strTipEmbala = TipEmbala;
                 InitializerKeys();
             }
             catch (Exception ex)
@@ -419,39 +458,50 @@ namespace CostManagement.Dominio.Entidades
                 HashSet<LoteRpcKeyReci> hashLotePiso, string proClas03, string proClas05, string proClas01
             )
         {
-            strTipCod = tipCod.Trim();
-            strTipDescri = tipDescri.Trim();
-            strClaseProd = claseProd;
-            strLotTipo = lotTipo;
-            intCodCopacking = Convert.ToInt32(CodCopacking);
-            strTipoCopacking = tipoCopacking;
-            strProClas03 = proClas03;
-            strTipoProducto = proClas01 == "CC" && proClas05 == "EN" ? "ENTERO" :
-                    proClas01 == "SC" && proClas05 == "SH" ? "COLA" :
-                    proClas01 == "CC" && proClas05 == "VA" ? "ENTERO VALOR AGREGADO" :
-                    proClas01 == "SC" && proClas05 == "VA" ? "COLA VALOR AGREGADO" :
-                    "OTRO";
-            intLotNumero = (int)lotNumero;
-            intLoteUnificado = (int)loteUnificado;
-            strPlantaProceso = plantaProceso;
-            //strTipoProducto = tipoProducto;
-            strCongeProduc = congeProduc;
-            intLoteOrigen = (int)loteOrigen;
-            dtFechaLote = fechaLote.HasValue
-                            ? DateOnly.FromDateTime(fechaLote.Value)
-                            : null;
-            dcRecibido = recibido;
-            dcLotProces = (decimal)lotProces;
-            dtLotFecha = (DateTime)lotFecha;
-            intCodProd = Convert.ToInt32(prodCod);
-            strDescriProduc = descriProduc;
-            strTalDescri = talDescri;
-            dbLibras = libras;
-            strAgrupacion = agrupacion;
-            intCodTal = codTal;
-            blExcluidoCosteo = hashLotePiso?.Contains(
-                    new LoteRpcKeyReci((int)loteOrigen, Convert.ToInt32(prodCod), codTal)) ?? false;
-            InitializerKeys();
+            try
+            {
+                List<string> lottiposValidos = new List<string> { "R2", "R5", "R6" };
+                strTipCod = tipCod.Trim();
+                strTipDescri = tipDescri.Trim();
+                strClaseProd = claseProd;
+                strLotTipo = lotTipo;
+                intCodCopacking =  !String.IsNullOrWhiteSpace( CodCopacking) ?   Convert.ToInt32(CodCopacking): 0;
+                strTipoCopacking = tipoCopacking;
+                strProClas03 = proClas03;
+                strTipoProducto = proClas01 == "CC" && proClas05 == "EN" ? "ENTERO" :
+                        proClas01 == "SC" && proClas05 == "SH" ? "COLA" :
+                        proClas01 == "CC" && proClas05 == "VA" ? "ENTERO VALOR AGREGADO" :
+                        proClas01 == "SC" && proClas05 == "VA" ? "COLA VALOR AGREGADO" :
+                        "OTRO";
+                intLotNumero = (int)lotNumero;
+                intLoteUnificado = (int)loteUnificado;
+                strPlantaProceso = plantaProceso;
+                //strTipoProducto = tipoProducto;
+                strCongeProduc = congeProduc;
+                intLoteOrigen = (int)loteOrigen;
+                dtFechaLote = fechaLote.HasValue
+                                ? DateOnly.FromDateTime(fechaLote.Value)
+                                : null;
+                dcRecibido = recibido;
+                dcLotProces = (decimal)lotProces;
+                dtLotFecha = (DateTime)lotFecha;
+                intCodProd = Convert.ToInt32(prodCod);
+                strDescriProduc = descriProduc;
+                strTalDescri = talDescri;
+                dbLibras = libras;
+                strAgrupacion = agrupacion;
+                intCodTal = codTal;
+                blExcluidoCosteo = hashLotePiso?.Contains(
+                        new LoteRpcKeyReci((int)loteOrigen, Convert.ToInt32(prodCod), codTal)) ?? false;
+                blEsDescongelado = (
+                    (lottiposValidos.Contains(strTipCod) && strLotTipo == "RE") ||
+                    strLotTipo == "VA") && strProClas03 == "PT";
+                InitializerKeys();
+            }
+            catch (Exception obj)
+            {
+                Console.WriteLine("", obj);
+            }
         }
         #endregion
 
@@ -676,17 +726,26 @@ List<MatPrimaReproceso> lstMatPrimaRpc)
 
 
 
-        public static Dictionary<LoteRpcKeyReci, decimal> GenerarDicProcGlobal(
-List<MatPrimaReproceso> lstMatPrimaRpc)
+        // Anterior: reemplazado para valorar desde totales sin perder precisión.
+        // public static Dictionary<LoteRpcKeyReci, decimal> GenerarDicProcGlobal(
+        // List<MatPrimaReproceso> lstMatPrimaRpc)
+        // {
+        //     return lstMatPrimaRpc
+        //         .Where(x => x.strAgrupacion == "2. PROCESADO"
+        //                  && x.dbCostoXSecuencial > 0
+        //                  && x.dbLibras > 0)
+        //         .GroupBy(x => x.objRpcValOrKey)
+        //         .ToDictionary(
+        //             g => g.Key,
+        //             g => g.First().dcCostoTotXLibra ?? 0m);
+        // }
+        public static Dictionary<LoteRpcKeyReci, decimal> GenerarDicProcGlobal(List<MatPrimaReproceso> lstMatPrimaRpc, ILogger? objLogger = null)
         {
-            return lstMatPrimaRpc
-                .Where(x => x.strAgrupacion == "2. PROCESADO"
-                         && x.dbCostoXSecuencial > 0
-                         && x.dbLibras > 0)
-                .GroupBy(x => x.objRpcValOrKey)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.First().dcCostoTotXLibra ?? 0m);
+            var lstGrupos = lstMatPrimaRpc.Where(x => x.strAgrupacion == "2. PROCESADO" && x.dbCostoXSecuencial > 0 && x.dbLibras > 0)
+                .GroupBy(x => x.objRpcValOrKey).ToList();
+            DiagnosticoPrecision.Diccionario(objLogger, "DiccionarioPROC", lstGrupos.Count,
+                lstGrupos.Count(g => DiagnosticoPrecision.EsUnitarioDosDecimales(g.First().dcCostoTotXLibra ?? 0m)));
+            return lstGrupos.ToDictionary(g => g.Key, g => Math.Round(g.Sum(x => x.dcTotalDolSum) / g.Sum(x => (decimal)x.dbLibras), 4));
         }
 
         public static Dictionary<LoteRpcKeyReci, decimal> GenerarPromedioPonderadoXLote(
@@ -706,6 +765,15 @@ List<MatPrimaReproceso> lstMatPrimaRpc)
                         return totLbs > 0 ? Math.Round(totDol / totLbs, 4) : 0m;
                     });
         }
+        /// <summary>
+        /// Costo completo de una fila PROCESADO: materia prima + proceso + material
+        /// empaque + tarifario adicional. Única fórmula — la usan tanto
+        /// RendimientoReproPlanRecibProc (recalculo final) como TransferirPrecioFuente
+        /// (para que el destino herede el costo completo del origen, no solo materia prima).
+        /// </summary>
+        public static decimal CalcularCostoTotalDolSum(MatPrimaReproceso item) =>
+            (item.dcCostTotalProc ?? 0m) + (item.dcCostoTotalMatEmp ?? 0m) + item.dbCostoTotal + (item.dcTarifaProc ?? 0m);
+
         public static Dictionary<LoteRpcValKey, decimal> GenerarCostoReciX(
     List<MatPrimaReproceso> lstMatPrimaRpc, LoteRpcKeyXSec objLoteFuente, LoteRpcKeyXSec objLoteDestino)
         {
@@ -718,7 +786,8 @@ List<MatPrimaReproceso> lstMatPrimaRpc)
                 .GroupBy(x => x.objProdTalKey)   // LoteRpcKeyXProdTal(intProdCod, intCodTal)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.First().dbCostoXSecuencial); // ← ver pregunta 2 abajo
+                    // Anterior: g => g.First().dbCostoXSecuencial); se usa el total completo conocido de PROCESADO.
+                    g => g.Sum(x => CalcularCostoTotalDolSum(x)) / g.Sum(x => (decimal)x.dbLibras));
 
             // 2. RECIBIDO del destino: hereda el costo del fuente por (producto, talla)
             return lstMatPrimaRpc
@@ -854,6 +923,8 @@ List<MatPrimaReproceso> lstMatPrimaRpc)
             this.objLoteProdReciKey = new LoteRpcKeyLoteXProd(this.intLotNumero, this.intCodProd.ToString().Trim());
             if (this.strAgrupacion == "1. RECIBIDO")
                 this.objLoteProdTalReciKey = new LoteRpcKeyReci((int)intLoteOrigen, this.intCodProd, this.intCodTal);
+            if (this.strAgrupacion == "2. PROCESADO")
+                this.objFrskey = new LoteFrsKey((int)intLoteUnificado, this.intCodProd, this.intCodTal);
             this.objRpcValOrKey = new LoteRpcKeyReci(this.intLoteUnificado, this.intCodProd, this.intCodTal);
         }
         #endregion

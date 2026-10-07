@@ -1,5 +1,7 @@
 ﻿using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
+using CostManagementService.Aplicacion.DTos;
+using CostManagementService.Dominio.Entidades;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -31,7 +33,7 @@ namespace CostManagement.Aplicación.DTos
         public string? strTipoLote { get; set; }
 
         [Column("Descripcion")]
-        [JsonProperty("Descripcion")]   
+        [JsonProperty("Descripcion")]
         public string strDescripcion { get; set; }
 
         [Column("Valor")]
@@ -58,7 +60,7 @@ namespace CostManagement.Aplicación.DTos
                     .Where(p => !string.IsNullOrWhiteSpace(p.strDescripcion))
                 .ToDictionary(
                         p => p.strDescripcion.Trim(),
-                        p => (decimal) p.dcCostUnitario)
+                        p => (decimal)p.dcCostUnitario)
                 );
         }
         /// <summary>
@@ -105,10 +107,22 @@ namespace CostManagement.Aplicación.DTos
         public List<ProcesoResultadoDto> lstProcesoFrs { get; set; }
         public List<ProcesoResultadoDto> lstProcesoRpc { get; set; }
         public List<ProcesoResultadoDto> lstProcesoTarifa { get; set; }
+        /// <summary>
+        /// Snapshot de configuración de costos productivos leído una sola vez desde
+        /// SGCAM. MotorProcesoParametro lo consulta en memoria; no hace consultas BD.
+        /// </summary>
+        public ConfiguracionCostoProductivoRuntimeDto objConfiguracionCostoProductivo { get; set; } = new ConfiguracionCostoProductivoRuntimeDto();
+        public IReadOnlyDictionary<string, int> dicNivelesCosteoRuntime { get; set; } = new Dictionary<string, int>();
         #endregion
 
         #region Datos Reprocesos
-        public List<MatPrimaReproceso> lstLiqRepro  { get; set; }
+        public List<InfoProd> lstInfoProd { get; set; }
+        #endregion
+
+        #region Datos Reprocesos
+        public List<MatPrimaReproceso> lstLiqRepro { get; set; }
+
+        public List<MatPrimaReproceso> lstLiqReproCompleto { get; set; } = new();
 
         public decimal dcCostoHidraReproceso { get; set; }
         #endregion
@@ -116,6 +130,8 @@ namespace CostManagement.Aplicación.DTos
         #region Datos Fresco
         public List<LiquidacionResultado> lstLiqFresco { get; set; }
         public List<LiquidacionResultado> lstLiqFrsRpc { get; set; }
+
+        public List<InventarioVal> lstInvenVal { get; set; }
         public List<RptGrncLibras> lstLibrasProduccion { get; set; }
         public List<RptCongInd> lstLotOpcon { get; set; }
         public List<ResumenEstiloLbsDto> lstResumenEstiloLbs { get; set; }
@@ -126,6 +142,10 @@ namespace CostManagement.Aplicación.DTos
         public List<CopackingLbs> lstCopackingLbs { get; set; }
         public List<ProcesoResultadoDto> lstResultados { get; set; }
         public List<int> lstLotesFrsRpc { get; set; }
+
+        public List<LibrasParticionDto> lstLibrasParticion { get; set; }
+        public List<CostoProcesoParticionDto> lstCostoProcesoParticion { get; set; } = new();
+        public List<ParamRectrac> lstInfoRetrac { get; set; }
 
         #endregion
         #region Parametros Generales

@@ -1,9 +1,9 @@
-﻿using CostManagement.Infraestructura.EF_Core;
-using Microsoft.EntityFrameworkCore;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using CostManagement.Infraestructura.EF_Core;
+using Microsoft.EntityFrameworkCore;
 
 namespace CostManagementService.Infraestructura.EF_Core;
 
@@ -76,6 +76,7 @@ public partial class TbProcesoCosteo
 
     [Column("pr_editable")]
     public bool? PrEditable { get; set; }
+
     [InverseProperty("PcPr")]
     public virtual ICollection<TbParametroCosteo> TbParametroCosteo { get; set; } = new List<TbParametroCosteo>();
 }

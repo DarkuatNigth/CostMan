@@ -31,9 +31,11 @@
 
         /// <summary>Devuelve el nivel de costeo para un strTipCod dado.
         /// Si no está en el mapa retorna 2 (comportamiento conservador).</summary>
-        public static int ObtenerNivel(string tipCod)
-            => !string.IsNullOrWhiteSpace(tipCod) && _mapaDeNivel.TryGetValue(tipCod.Trim(), out int nv)
-                ? nv : 2;
+        public static int ObtenerNivel(string tipCod, IReadOnlyDictionary<string, int>? mapaRuntime = null)
+            => !string.IsNullOrWhiteSpace(tipCod)
+                ? mapaRuntime != null && mapaRuntime.TryGetValue(tipCod.Trim(), out int nvRuntime) ? nvRuntime
+                    : _mapaDeNivel.TryGetValue(tipCod.Trim(), out int nv) ? nv : 2
+                : 2;
 
         /// <summary>Etiqueta textual del nivel: "NV2", "NV3", etc.</summary>
         public static string EtiquetaNivel(int nivel) => $"NV{nivel}";
@@ -43,8 +45,9 @@
             => !string.IsNullOrWhiteSpace(tipCod) && TipCodsEspecialesNV2.Contains(tipCod.Trim());
 
         /// <summary>Devuelve todos los tipCod que pertenecen a un nivel.</summary>
-        public static IEnumerable<string> TipCodsDeNivel(int nivel)
-            => _mapaDeNivel.Where(kv => kv.Value == nivel).Select(kv => kv.Key);
+        public static IEnumerable<string> TipCodsDeNivel(int nivel, IReadOnlyDictionary<string, int>? mapaRuntime = null)
+            => _mapaDeNivel.Keys.Concat(mapaRuntime?.Keys ?? Enumerable.Empty<string>())
+                .Distinct(StringComparer.OrdinalIgnoreCase).Where(t => ObtenerNivel(t, mapaRuntime) == nivel);
 
   
         /// <summary>
@@ -54,22 +57,23 @@
         /// pero su nivel es 3 → en esta versión CDI usa prorrateo normal (más correcto).
         /// Si se quiere que CDI mantenga su método especial, cambiar la condición.
         /// </summary>
-        public static bool AplicaMetodoEspecial(string tipCod)
+        public static bool AplicaMetodoEspecial(string tipCod, IReadOnlyDictionary<string, int>? mapaRuntime = null)
         {
             if (string.IsNullOrWhiteSpace(tipCod)) return false;
             string t = tipCod.Trim().ToUpper();
             List<string> lstEspecialesNV2 = new List<string> { "UNI", "R7" , "CDI" };
             // Solo UNI y R7 tienen nivel 2 Y método especial
             // CDI (nivel 3) se excluye aquí → usa prorrateo estándar desde NV3
-            return lstEspecialesNV2.Contains(t) && ObtenerNivel(t) == 2;
+            return lstEspecialesNV2.Contains(t) && ObtenerNivel(t, mapaRuntime) == 2;
         }
         public static int DeterminarNivelLote(
                 LoteRpcKeyXSec lote,
-                ILookup<LoteRpcKeyXSec, MatPrimaReproceso> indiceXLote)
+                ILookup<LoteRpcKeyXSec, MatPrimaReproceso> indiceXLote,
+                IReadOnlyDictionary<string, int>? mapaRuntime = null)
         {
             var niveles = indiceXLote[lote]
                 .Where(x => x.strAgrupacion == "2. PROCESADO")
-                .Select(x => NivelCosteo.ObtenerNivel(x.strTipCod))
+                .Select(x => NivelCosteo.ObtenerNivel(x.strTipCod, mapaRuntime))
                 .ToList();
 
             return niveles.Any() ? niveles.Max() : 2;
