@@ -7,6 +7,7 @@ using CostManagement.Infraestructura.Utils;
 using CostManagementService.Aplicacion.DTos;
 using CostManagementService.Aplicación.DTos;
 using CostManagementService.Aplicacion.Features;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -21,6 +22,7 @@ using System.Security.Cryptography;
 
 namespace CostManagement.API.Controllers
 {
+    //[Authorize]
     [ApiController]
     [Route("[controller]")]
     public class ReportingController : ControllerBase

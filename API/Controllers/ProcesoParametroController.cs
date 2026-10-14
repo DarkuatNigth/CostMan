@@ -8,6 +8,7 @@ using CostManagement.Infraestructura.Utils;
 using CostManagementService.Aplicacion.DTos;
 using CostManagementService.Aplicacion.Features;
 using CostManagementService.Infraestructura.EF_Core;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
@@ -16,6 +17,7 @@ using static CostManagement.Aplicación.DTos.HaberDistribucionDTO;
 
 namespace CostManagement.API.Controllers
 {
+    //[Authorize]
     [ApiController]
     [Route("[controller]")]
     public class ProcesoParametroController : ControllerBase
