@@ -244,4 +244,62 @@ namespace CostManagementService.Aplicacion.DTos
 
         #endregion
     }
+
+
+    public class MuestrasObsequiosDto
+    {
+        // ── TRANSACCIÓN ──
+        [Column("trc_tipo")]
+        public string TrcTipo { get; set; }
+
+        [Column("trs_descri")]
+        public string TrsDescri { get; set; }
+
+        [Column("tcd_lote")]
+        public long TcdLote { get; set; }               // bigint
+
+        [Column("trc_numsec")]
+        public decimal TrcNumsec { get; set; }          // numeric(18,0)
+
+        // ── CANTIDADES ──
+        [Column("libras")]
+        public double? Libras { get; set; }             // float; NULL si med_factor es NULL
+
+        // ── TALLA ──
+        [Column("tal_codigo")]
+        public decimal TalCodigo { get; set; }          // numeric(18,0), sin LTRIM/RTRIM
+
+        [Column("tal_descri")]
+        public string? TalDescri { get; set; }          // acepta NULL
+
+        // ── PRODUCTO ──
+        [Column("pro_codcor")]
+        public string ProCodcor { get; set; }
+
+        [Column("pro_desesp")]
+        public string ProDesesp { get; set; }
+
+        [Column("pro_clas01")]
+        public string ProClas01 { get; set; }
+
+        [Column("pro_clas02")]
+        public string ProClas02 { get; set; }
+
+        [Column("pro_clas03")]
+        public string ProClas03 { get; set; }
+
+        [Column("pro_clas04")]
+        public string ProClas04 { get; set; }
+
+        [Column("pro_clas05")]
+        public string ProClas05 { get; set; }
+
+        // ── FACTURA / CLIENTE (NULL en obsequios) ──
+        [Column("emb_factura")]
+        public string? EmbFactura { get; set; }
+
+        [Column("cli_descripcion")]
+        public string? CliDescripcion { get; set; }
+    }
+
 }

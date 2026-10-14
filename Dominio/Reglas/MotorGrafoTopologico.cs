@@ -56,33 +56,33 @@ namespace CostManagement.Dominio.Reglas
 
                 if (blTieneInter)
                     foreach (var fuente in lstDependencias[objLote])
-                        TransferirPrecioFuente(fuente, objLote, objIndice, objDataProceso.lstLiqRepro);
+                        TransferirPrecioFuente(fuente, objLote, objIndice, objDataProceso.dicNivelesCosteoRuntime, objDataProceso.lstLiqRepro);
 
                 _objMotorProrra.Ejecutar(
-                    objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+                    objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir, objDataProceso.dicNivelesCosteoRuntime,
                     objLotesPermitidos: new HashSet<LoteRpcKeyXSec> { objLote },
                     objIndiceXLote: objIndice);
             }
 
             // NV4: barrido global de rezagados
             _objMotorProrra.Ejecutar(
-                objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+                objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir, objDataProceso.dicNivelesCosteoRuntime,
                 objLotesPermitidos: null, objIndiceXLote: null);
 
             // Propagación post-NV4
             PropagacionPostNV4(objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
-                               objIndice, lstDependencias, lstDependientes);
+                               objIndice, lstDependencias, lstDependientes, objDataProceso.dicNivelesCosteoRuntime);
 
             // NV4: barrido global de rezagados (segundo pase)
             _objMotorProrra.Ejecutar(
-                objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+                objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir, objDataProceso.dicNivelesCosteoRuntime,
                 objLotesPermitidos: null, objIndiceXLote: null);
             // Propagación post-NV4
             PropagacionPostNV4(objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
-                               objIndice, lstDependencias, lstDependientes);
+                               objIndice, lstDependencias, lstDependientes, objDataProceso.dicNivelesCosteoRuntime);
             // NV4: barrido global de rezagados (tercer pase)
             _objMotorProrra.Ejecutar(
-                objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
+                objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir, objDataProceso.dicNivelesCosteoRuntime,
                 objLotesPermitidos: null, objIndiceXLote: null);
             // Propagación post-NV4
             //PropagacionPostNV4(objDataProceso.lstLiqRepro, objDataProceso.lstLiqFresco, lstPrecioFrsUni, lstPrecioFrsDir,
@@ -97,6 +97,7 @@ namespace CostManagement.Dominio.Reglas
             LoteRpcKeyXSec objLoteFuente,
             LoteRpcKeyXSec objLoteDestino,
             ILookup<LoteRpcKeyXSec, MatPrimaReproceso> objIndice,
+            IReadOnlyDictionary<string, int> mapaNiveles,
             List<MatPrimaReproceso> lstGlobal = null)
         {
             var dcFuenteCosto = objIndice[objLoteFuente]
@@ -109,10 +110,19 @@ namespace CostManagement.Dominio.Reglas
                     g => g.Key,
                     g => {
                         decimal lbs = (decimal)g.Sum(x => x.dbLibras);
-                         decimal dol = g.Sum(x => x.dcTotalDolSum);
+                        // ===== VERSION ANTERIOR (comentada para referencia) - 2026-10-02 =====
+                        // decimal dol = g.Sum(x => x.dcTotalDolSum);
+                        // NUEVO: dcTotalDolSum siempre es 0 en este punto del flujo (ver sección 1.2/1.3
+                        // del plan) — se calcula el costo completo en el momento con el mismo helper
+                        // que usa RendimientoReproPlanRecibProc.
+                        decimal dol = g.Sum(x => MatPrimaReproceso.CalcularCostoTotalDolSum(x));
                         return lbs > 0 ? dol / lbs : 0m;
                     });
 
+            var dicTotalesFuente = objIndice[objLoteFuente].Where(x => x.strAgrupacion == "2. PROCESADO"
+                && x.dbCostoXSecuencial != 0 && x.intLotNumero == objLoteFuente.intLoteSecuencial && x.intLoteUnificado == objLoteFuente.intLoteUnificado)
+                .GroupBy(x => x.objProdTalKey).ToDictionary(g => g.Key,
+                    g => (dcTotal: g.Sum(x => MatPrimaReproceso.CalcularCostoTotalDolSum(x)), dcLibras: g.Sum(x => (decimal)x.dbLibras)));
             bool blDbgDest = objLoteDestino.intLoteSecuencial == _DBG_LOTE;
             bool blDbgFte  = objLoteFuente.intLoteSecuencial  == _DBG_LOTE;
 
@@ -176,7 +186,7 @@ namespace CostManagement.Dominio.Reglas
             {
                 LoteRpcKeyXProdTal objKey = rec.objProdTalKey;
                 decimal dcPrecio = 0m;
-                string strNivel = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod));
+                string strNivel = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles));
 
                 if (dcFuenteCosto.TryGetValue(objKey, out decimal p1) && p1 > 0)
                     dcPrecio = p1;
@@ -193,8 +203,16 @@ namespace CostManagement.Dominio.Reglas
                         $"dcFuente={dcFuenteCosto.ContainsKey(objKey)}({(dcFuenteCosto.TryGetValue(objKey, out var _px) ? _px : 0):F4}) " +
                         $"dictOrigen={(dictOrigen?.ContainsKey(rec.objLotRpc) == true)} → PrecioFinal={dcPrecio:F4}");
 
+                // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                // if (dcPrecio > 0)
+                //     _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, strNivel);
                 if (dcPrecio > 0)
-                    _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, strNivel);
+                {
+                    if (dcFuenteCosto.TryGetValue(objKey, out decimal dcPrecioFuente) && dcPrecioFuente > 0
+                        && dicTotalesFuente.TryGetValue(objKey, out var objFuente) && objFuente.dcLibras > 0m)
+                        _objMotorAsigPrec.AsignarPrecioPorTotal(rec, objFuente.dcTotal, objFuente.dcLibras, strNivel);
+                    else _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, strNivel);
+                }
             }
         }
 
@@ -206,7 +224,8 @@ namespace CostManagement.Dominio.Reglas
             List<PrecioFrsXMov> lstDir,
             ILookup<LoteRpcKeyXSec, MatPrimaReproceso> objIndice,
             Dictionary<LoteRpcKeyXSec, HashSet<LoteRpcKeyXSec>> dependencias,
-            Dictionary<LoteRpcKeyXSec, HashSet<LoteRpcKeyXSec>> dependientes)
+            Dictionary<LoteRpcKeyXSec, HashSet<LoteRpcKeyXSec>> dependientes,
+            IReadOnlyDictionary<string, int> mapaNiveles)
         {
             var objIndiceUnif = lstRpc
                 .Select(x => x.objLoteKey)
@@ -327,8 +346,10 @@ namespace CostManagement.Dominio.Reglas
 
                             if (dcPrecio > 0)
                             {
-                                string strNivelAR = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod));
-                                _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, strNivelAR);
+                                string strNivelAR = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles));
+                                // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                                // _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, strNivelAR);
+                                _objMotorAsigPrec.AsignarPrecioPorTotal(rec, dcDol, dcLbs, strNivelAR);
                                 objDesbloqueados.Add(objKey);
                             }
                         }
@@ -355,7 +376,7 @@ namespace CostManagement.Dominio.Reglas
 
                         if (conProcCosteado.Contains(objFuente))
                         {
-                            TransferirPrecioFuente(objFuente, objKey, objIndice, lstRpc);
+                            TransferirPrecioFuente(objFuente, objKey, objIndice, mapaNiveles, lstRpc);
                             if (blDbgRec)
                                 _objLogger.LogInformation(
                                     $"[DBG-{_DBG_LOTE}][PropPost]   PostTransferir Fuente={objFuente.intLoteSecuencial} " +
@@ -390,7 +411,7 @@ namespace CostManagement.Dominio.Reglas
                     foreach (var rec in lstRpc.Where(x =>
                         x.strAgrupacion == "1. RECIBIDO" &&
                         x.dbCostoXSecuencial == 0 &&
-                        !NivelCosteo.AplicaMetodoEspecial(x.strTipCod)))
+                        !NivelCosteo.AplicaMetodoEspecial(x.strTipCod, mapaNiveles)))
                     {
                         bool blDbgFill = rec.intLotNumero == _DBG_LOTE && rec.intCodProd == _DBG_PROD && rec.intCodTal == _DBG_TAL;
                         var key = rec.objProdTalKey;
@@ -400,7 +421,7 @@ namespace CostManagement.Dominio.Reglas
                                 _objLogger.LogInformation(
                                     $"[DBG-{_DBG_LOTE}][PropPost][Fill] P{intPasada}: " +
                                     $"Asignando precio global Prod={rec.intCodProd} Tal={rec.intCodTal} Precio={dcPrecio:F4}");
-                            _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod)));
+                            _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles)));
                         }
                         else if (blDbgFill)
                             _objLogger.LogWarning(
@@ -422,10 +443,10 @@ namespace CostManagement.Dominio.Reglas
                 foreach (var objLote in ordenPost)
                 {
                     if (depsFilt.TryGetValue(objLote, out var fuentesInt))
-                        foreach (var f in fuentesInt) TransferirPrecioFuente(f, objLote, objIndice);
+                        foreach (var f in fuentesInt) TransferirPrecioFuente(f, objLote, objIndice, mapaNiveles);
 
                     _objMotorProrra.Ejecutar(
-                        lstRpc, lstFresco, lstUni, lstDir,
+                        lstRpc, lstFresco, lstUni, lstDir, mapaNiveles,
                         objLotesPermitidos: new HashSet<LoteRpcKeyXSec> { objLote },
                         objIndiceXLote: objIndice);
                 }

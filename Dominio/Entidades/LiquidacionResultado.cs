@@ -185,12 +185,23 @@ namespace CostManagement.Dominio.Entidades
         [Column("Total Proceso")]
         public decimal? dcCostTotalProc { get; set; }
 
+        [Column("Total Warren")]
+        public decimal? dcTotalWarren { get; set; }
+
+        // Mantener dcTotalDolSum como está:
         [Column("Total Costos")]
         public decimal dcTotalDolSum { get; set; }
+
+        // Agregar inmediatamente debajo de dcTotalDolSum:
+        [Column("Total Costo Warren")]
+        public decimal? dcTotalCostoWarren { get; set; }
         //[NotMapped]
         //[JsonIgnore]
         [Column("Costo X Libra")]
         public decimal? dcCostoTotXLibra { get; set; }
+
+        [Column("Costo X Libra Warren")]
+        public decimal? dcCostoTotXLibraWarren { get; set; }
 
         [Column("Validador")]
         public decimal dcValidador { get; set; }
@@ -216,6 +227,9 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         [Column("BodEsBrine")]
         public bool blBodEsBrine { get; set; }
+
+        [JsonIgnore]
+        public decimal? dcCostLogistica { get; set; }
 
         [JsonIgnore]
         public decimal? dcCostRecepcion { get; set; }
@@ -294,6 +308,18 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         [Column("LiqCopack")]
         public int intCodCopacking { get; set; }
+
+        [JsonIgnore]
+        [Column("Rendimiento")]
+        public decimal dcRendimiento{ get; set; }
+
+        [JsonIgnore]
+        [Column("LbsReciXRend")]
+        public decimal dcLbsReciXRend { get; set; }
+
+        [JsonIgnore]
+        [NotMapped]
+        public bool blRetractilado { get; set; }
 
         //Por ahora solo usado con fresco
         [NotMapped]
@@ -623,10 +649,10 @@ namespace CostManagement.Dominio.Entidades
         /// </summary>
         /// <param name="lstMatPrimaFrs">Lista de objetos con los costos.</param>
         /// <returns>Diccionario donde la llave es (Lote, Producto, Talla) y el valor es el Precio Promedio calculado.</returns>
-        public static Dictionary<(int Lote, int? Producto, int? Talla), decimal?> GenerarDiccionarioCostoXTalla(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        public static Dictionary<LoteFrsKey, decimal?> GenerarDiccionarioCostoXTalla(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
         {
             if (lstMatPrimaFrs == null)
-                return new Dictionary<(int, int?, int?), decimal?>();
+                return new Dictionary<LoteFrsKey, decimal?>();
 
             return (
                             from lct in lstMatPrimaFrs
@@ -634,34 +660,74 @@ namespace CostManagement.Dominio.Entidades
                             let dcCertificado = lct.dcValorCert == null ? 0m : lct.dcValorCert
                             group new { lct, dcCostMatEmp, dcCertificado } by new
                             {
-                                Lote = lct.intLote,
-                                Producto = lct.intCodProd,
-                                Talla = lct.intLidCodTal
+                                lct.objLotkey
                             } into g
                             select new
                             {
-                                Key = (g.Key.Lote, g.Key.Producto, g.Key.Talla),
-                                PrecioPromedio = g.Average(x => x.lct.dcCostoTotXLibra)
+                                Key = g.Key.objLotkey,
+                                // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                                // PrecioPromedio = g.Average(x => x.lct.dcCostoTotXLibra)
+                                PrecioPromedio = g.Sum(x => (decimal)x.lct.dcLibras) == 0m ? (decimal?)null : g.Sum(x => x.lct.dcTotalCostoWarren ?? x.lct.dcTotalDolSum) / g.Sum(x => (decimal)x.lct.dcLibras)
                             }
                         ).ToDictionary(x => x.Key, x => x.PrecioPromedio);
         }
 
-        public static Dictionary<LoteFrsKey, decimal> GenerarDiccionarioLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        public decimal? ObtenerCostoXLibraParaReproceso()
+        {
+            decimal libras = (decimal)dcLibras;
+            // Anterior: reemplazado para valorar desde totales sin perder precisión.
+            // if (libras <= 0m) return dcCostoTotXLibra;
+            if (libras <= 0m) return null;
+            decimal totalCierre = dcTotalCostoWarren ?? dcTotalDolSum;
+            return Math.Round(totalCierre / libras, 4, MidpointRounding.AwayFromZero);
+        }
+
+        public static Dictionary<LoteFrsKey, decimal?> GenerarDiccionarioCostoXTallaParaReproceso(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        {
+            if (lstMatPrimaFrs == null) return new Dictionary<LoteFrsKey, decimal?>();
+            return lstMatPrimaFrs.GroupBy(x => x.objLotkey).ToDictionary(g => g.Key, g =>
+            {
+                decimal libras = g.Sum(x => (decimal)x.dcLibras);
+                if (libras <= 0m) return (decimal?)null;
+                // Warren incluye materia prima, material de empaque y proceso Warren.
+                // Si no existe Warren, se usa el total normal.
+                decimal total = g.Sum(x => x.dcTotalCostoWarren ?? x.dcTotalDolSum);
+                return (decimal?)Math.Round(total / libras, 4, MidpointRounding.AwayFromZero);
+            });
+        }
+
+        // Anterior: reemplazado para valorar desde totales sin perder precisión.
+        // public static Dictionary<LoteFrsKey, decimal> GenerarDiccionarioLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        public static Dictionary<LoteFrsKey, decimal> GenerarDiccionarioLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs, ILogger? objLogger = null)
         {
             if (lstMatPrimaFrs == null)
                 return new Dictionary<LoteFrsKey, decimal>();
 
-            return lstMatPrimaFrs
-                    .GroupBy(lct => lct.objLotkey)
-                    .ToDictionary(
-                        g => g.Key,
-                        g => (decimal)g.First().dcCostoTotXLibra
+            var lstGruposPrecision = lstMatPrimaFrs.GroupBy(x => x.objLotkey).ToList();
+            DiagnosticoPrecision.Diccionario(objLogger, "DiccionarioFRS", lstGruposPrecision.Count,
+                lstGruposPrecision.Count(g => DiagnosticoPrecision.EsUnitarioDosDecimales(g.Sum(x => (decimal)x.dcLibras) <= 0m ? 0m
+                    : Math.Round(g.Sum(x => x.dcTotalCostoWarren ?? x.dcTotalDolSum) / g.Sum(x => (decimal)x.dcLibras), 4, MidpointRounding.AwayFromZero))));
+            // Anterior: reemplazado para valorar desde totales sin perder precisión.
+            // return lstMatPrimaFrs
+            //         .GroupBy(lct => lct.objLotkey)
+            return lstGruposPrecision
+                    // ANTERIOR (costo normal de la primera línea), reemplazado por promedio ponderado Warren.
+                    //.ToDictionary(
+                        //g => g.Key,
+                        //g => (decimal)g.First().dcCostoTotXLibra
                         //{
                         //    decimal totLbs = (decimal)g.Sum(x => x.dcLibras);
                         //    decimal totDol = g.Sum(x => x.dcTotalDolSum);
                         //    return totLbs > 0 ? Math.Round(totDol / totLbs, 4) : 0m;
                         //}
-                    );
+                    //);
+                    .ToDictionary(g => g.Key, g =>
+                    {
+                        decimal dcLibras = g.Sum(x => (decimal)x.dcLibras);
+                        if (dcLibras <= 0m) return 0m;
+                        decimal dcTotal = g.Sum(x => x.dcTotalCostoWarren ?? x.dcTotalDolSum);
+                        return Math.Round(dcTotal / dcLibras, 4, MidpointRounding.AwayFromZero);
+                    });
         }
 
         public static Dictionary<LoteRpcKeyXProdTal, decimal> GenerarDiccionarioPromPondLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
@@ -721,6 +787,11 @@ namespace CostManagement.Dominio.Entidades
 }
     public class ProcesoPrimarioDto
     {
+
+        [Column("Logistica")]
+        [JsonProperty("Logistica")]
+        public decimal? dcLogistica { get; set; }
+
         [Column("Recepcion")]
         [JsonProperty("Recepcion")]
         public decimal? dcRecepcion { get; set; }
@@ -766,6 +837,10 @@ namespace CostManagement.Dominio.Entidades
         [Column("Descabezado")]
         [JsonProperty("Descabezado")]
         public decimal? dcDescabezado { get; set; }
+
+        [Column("Descongelado")]
+        [JsonProperty("Descongelado")]
+        public decimal? dcDescongelado { get; set; }
 
         [Column("Pelado")]
         [JsonProperty("Pelado")]

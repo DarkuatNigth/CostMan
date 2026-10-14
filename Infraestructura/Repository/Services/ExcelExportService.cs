@@ -26,6 +26,7 @@ namespace CostManagement.Infraestructura.Repository.Services
         private readonly IDbContextFactory<SongDbContext> _objSongFactory;
         private readonly ILogger<ExcelExportService> _objLogger;
         private readonly IOptions<ParametrosConfig> _objConfig;
+        private static readonly HashSet<string> _hshColumnasCostoPorLibra = new(StringComparer.OrdinalIgnoreCase) { "Costo X Libra", "Costo Venta Unitario", "Costo X Libra Lote" };
         public ExcelExportService(
                 ILogger<ExcelExportService> objLogger,
                 IOptions<ParametrosConfig> objConfig,
@@ -107,6 +108,651 @@ namespace CostManagement.Infraestructura.Repository.Services
             {
                 ManejoLog<ExcelExportService>.Error(_objLogger, nameof(ExcelExportService), nameof(ObtenerReporteExcel), ObjException);
                 throw;
+            }
+        }
+
+        public Task<DataGeneralResult> DataDiariosCierreExcel(
+    DataGeneralRequest request,
+    DiariosCierreDto cierre)
+        {
+            try
+            {
+                using var workbook =
+                    new XLWorkbook();
+
+                CrearResumenDiarios(
+                    workbook,
+                    request,
+                    cierre);
+
+                CrearTransferenciasDiarios(
+                    workbook,
+                    cierre);
+
+                CrearRetornosDiarios(
+                    workbook,
+                    cierre);
+
+                using var stream =
+                    new MemoryStream();
+
+                workbook.SaveAs(stream);
+
+                return Task.FromResult(
+                    new DataGeneralResult
+                    {
+                        Success = true,
+                        Data = stream.ToArray()
+                    });
+            }
+            catch (Exception ex)
+            {
+                ManejoLog<ExcelExportService>.Error(
+                    _objLogger,
+                    nameof(ExcelExportService),
+                    nameof(DataDiariosCierreExcel),
+                    ex);
+
+                return Task.FromResult(
+                    new DataGeneralResult
+                    {
+                        Success = false,
+                        Message = ex.Message
+                    });
+            }
+        }
+
+
+        private static void AplicarTituloPrincipal(
+    IXLRange range)
+        {
+            range.Style.Fill.BackgroundColor =
+                XLColor.FromHtml("#196AA5");
+
+            range.Style.Font.FontColor =
+                XLColor.White;
+
+            range.Style.Font.Bold = true;
+
+            range.Style.Font.FontSize = 13;
+
+            range.Style.Alignment.Horizontal =
+                XLAlignmentHorizontalValues.Left;
+        }
+
+
+        private static void AplicarTituloSecundario(
+            IXLRange range)
+        {
+            range.Style.Fill.BackgroundColor =
+                XLColor.FromHtml("#EAF4FB");
+
+            range.Style.Font.Bold = true;
+
+            range.Style.Font.FontColor =
+                XLColor.FromHtml("#0A416C");
+        }
+
+
+        private static void AplicarHeader(
+            IXLRange range)
+        {
+            range.Style.Fill.BackgroundColor =
+                XLColor.FromHtml("#F0F2F4");
+
+            range.Style.Font.Bold = true;
+
+            range.Style.Border.OutsideBorder =
+                XLBorderStyleValues.Thin;
+
+            range.Style.Border.InsideBorder =
+                XLBorderStyleValues.Thin;
+        }
+
+        private static void CrearRetornosDiarios(
+    XLWorkbook workbook,
+    DiariosCierreDto cierre)
+        {
+            IXLWorksheet ws =
+                workbook.Worksheets
+                    .Add("Retornos");
+
+            int fila = 1;
+
+            ws.Cell(fila, 1).Value =
+                "RETORNO DE CONTENEDORES";
+
+            ws.Range(fila, 1, fila, 7)
+                .Merge();
+
+            AplicarTituloPrincipal(
+                ws.Range(fila, 1, fila, 7));
+
+            fila += 2;
+
+            if (cierre.objRetornos.lstDiarios.Count == 0)
+            {
+                ws.Cell(fila, 1).Value =
+                    cierre.objRetornos.strMensaje ??
+                    "No existen retornos para el período.";
+
+                ws.Range(fila, 1, fila, 7)
+                    .Merge();
+
+                return;
+            }
+
+            foreach (
+                DiarioRetornoCierreDto diario
+                in cierre.objRetornos.lstDiarios)
+            {
+                ws.Cell(fila, 1).Value =
+                    diario.strTitulo;
+
+                ws.Range(fila, 1, fila, 7)
+                    .Merge();
+
+                AplicarTituloSecundario(
+                    ws.Range(fila, 1, fila, 7));
+
+                fila++;
+
+                if (!string.IsNullOrWhiteSpace(
+                    diario.strNumeroDocumento))
+                {
+                    ws.Cell(fila, 1).Value = "Documento";
+                    ws.Cell(fila, 2).Value =
+                        diario.strNumeroDocumento;
+                }
+
+                if (!string.IsNullOrWhiteSpace(
+                    diario.strReferencia))
+                {
+                    ws.Cell(fila, 4).Value = "Referencia";
+                    ws.Cell(fila, 5).Value =
+                        diario.strReferencia;
+                }
+
+                fila++;
+
+                string[] columnas =
+                {
+            "Código",
+            "Cuenta Contable",
+            "Clave",
+            "Descripción",
+            "DEBE ($)",
+            "HABER ($)",
+            "Detalle"
+        };
+
+                for (int i = 0; i < columnas.Length; i++)
+                {
+                    ws.Cell(fila, i + 1).Value =
+                        columnas[i];
+                }
+
+                AplicarHeader(
+                    ws.Range(fila, 1, fila, 7));
+
+                fila++;
+
+                List<DiarioRetornoFilaDto> filas =
+                    diario.lstFilas
+                        .OrderBy(x =>
+                            x.dcDebe > 0m
+                                ? 0
+                                : x.dcHaber > 0m
+                                    ? 1
+                                    : 2)
+                        .ThenBy(x => x.intOrden)
+                        .ToList();
+
+                foreach (
+                    DiarioRetornoFilaDto item
+                    in filas)
+                {
+                    ws.Cell(fila, 1).Value =
+                        item.strCodigo ?? string.Empty;
+
+                    ws.Cell(fila, 2).Value =
+                        item.strCuentaContable;
+
+                    ws.Cell(fila, 3).Value =
+                        item.strClave ?? string.Empty;
+
+                    ws.Cell(fila, 4).Value =
+                        item.strDescripcion;
+
+                    ws.Cell(fila, 5).Value =
+                        item.dcDebe;
+
+                    ws.Cell(fila, 6).Value =
+                        item.dcHaber;
+
+                    ws.Cell(fila, 7).Value =
+                        item.strDetalle ?? string.Empty;
+
+                    ws.Range(fila, 5, fila, 6)
+                        .Style.NumberFormat.Format =
+                            "$ #,##0.00";
+
+                    fila++;
+                }
+
+                decimal debe =
+                    diario.lstFilas.Sum(x =>
+                        x.dcDebe);
+
+                decimal haber =
+                    diario.lstFilas.Sum(x =>
+                        x.dcHaber);
+
+                decimal diferencia =
+                    Math.Round(
+                        debe - haber,
+                        2,
+                        MidpointRounding.AwayFromZero);
+
+                ws.Cell(fila, 4).Value =
+                    "TOTAL";
+
+                ws.Cell(fila, 5).Value =
+                    debe;
+
+                ws.Cell(fila, 6).Value =
+                    haber;
+
+                ws.Range(fila, 4, fila, 6)
+                    .Style.Font.SetBold();
+
+                fila++;
+
+                ws.Cell(fila, 4).Value =
+                    diferencia == 0m
+                        ? "CUADRADO"
+                        : "DESCUADRADO";
+
+                ws.Cell(fila, 5).Value =
+                    "DIFERENCIA";
+
+                ws.Cell(fila, 6).Value =
+                    diferencia;
+
+                fila++;
+
+                if (!string.IsNullOrWhiteSpace(
+                    diario.strGlosa))
+                {
+                    ws.Cell(fila, 1).Value =
+                        $"Glosa: {diario.strGlosa}";
+
+                    ws.Range(fila, 1, fila, 7)
+                        .Merge();
+
+                    fila++;
+                }
+
+                fila += 2;
+            }
+
+            ws.Column(1).Width = 16;
+            ws.Column(2).Width = 20;
+            ws.Column(3).Width = 12;
+            ws.Column(4).Width = 45;
+            ws.Column(5).Width = 18;
+            ws.Column(6).Width = 18;
+            ws.Column(7).Width = 45;
+        }
+        private static int PintarDiarioTransferencia(
+    IXLWorksheet ws,
+    int fila,
+    DiarioTransferenciaCierreDto diario)
+        {
+            /*
+             * Encabezado del asiento.
+             */
+            ws.Cell(fila, 1).Value =
+                $"{diario.strCodigo}  {diario.strTitulo}";
+
+            ws.Range(fila, 1, fila, 6)
+                .Merge();
+
+            var titulo =
+                ws.Range(fila, 1, fila, 6);
+
+            titulo.Style
+                .Fill.SetBackgroundColor(
+                    XLColor.FromHtml("#EAF4FB"))
+                .Font.SetBold()
+                .Font.SetFontColor(
+                    XLColor.FromHtml("#0A416C"));
+
+            titulo.Style.Border
+                .OutsideBorder =
+                    XLBorderStyleValues.Thin;
+
+            fila++;
+
+            if (!string.IsNullOrWhiteSpace(
+                diario.strGlosa))
+            {
+                ws.Cell(fila, 1).Value =
+                    diario.strGlosa;
+
+                ws.Range(fila, 1, fila, 6)
+                    .Merge();
+
+                ws.Cell(fila, 1)
+                    .Style.Font.Italic = true;
+
+                fila++;
+            }
+
+            /*
+             * Encabezados.
+             */
+            int filaHeader = fila;
+
+            string[] columnas =
+            {
+        "Cálculo",
+        "Código",
+        "Clave",
+        "Nombre de Cuenta",
+        "DEBE ($)",
+        "HABER ($)"
+    };
+
+            for (int i = 0; i < columnas.Length; i++)
+            {
+                ws.Cell(
+                    filaHeader,
+                    i + 1).Value =
+                        columnas[i];
+            }
+
+            AplicarHeader(
+                ws.Range(
+                    filaHeader,
+                    1,
+                    filaHeader,
+                    6));
+
+            fila++;
+
+            /*
+             * IMPORTANTE:
+             * primero todo el DEBE,
+             * después todo el HABER,
+             * finalmente las líneas en cero.
+             */
+            List<DiarioTransferenciaFilaDto> filas =
+                diario.lstFilas
+                    .OrderBy(x =>
+                        x.dcDebe > 0m
+                            ? 0
+                            : x.dcHaber > 0m
+                                ? 1
+                                : 2)
+                    .ThenBy(x => x.intOrden)
+                    .ToList();
+
+            foreach (
+                DiarioTransferenciaFilaDto item
+                in filas)
+            {
+                if (item.dcCalculo.HasValue)
+                {
+                    ws.Cell(fila, 1).Value =
+                        item.dcCalculo.Value;
+
+                    ws.Cell(fila, 1)
+                        .Style.NumberFormat.Format =
+                            "0.00%";
+                }
+
+                ws.Cell(fila, 2).Value =
+                    item.strCodigo ?? string.Empty;
+
+                ws.Cell(fila, 3).Value =
+                    item.strClave ?? string.Empty;
+
+                ws.Cell(fila, 4).Value =
+                    item.strNombreCuenta;
+
+                ws.Cell(fila, 5).Value =
+                    item.dcDebe;
+
+                ws.Cell(fila, 6).Value =
+                    item.dcHaber;
+
+                ws.Cell(fila, 5)
+                    .Style.NumberFormat.Format =
+                        "$ #,##0.00";
+
+                ws.Cell(fila, 6)
+                    .Style.NumberFormat.Format =
+                        "$ #,##0.00";
+
+                fila++;
+            }
+
+            decimal debe =
+                diario.lstFilas.Sum(x =>
+                    x.dcDebe);
+
+            decimal haber =
+                diario.lstFilas.Sum(x =>
+                    x.dcHaber);
+
+            decimal diferencia =
+                Math.Round(
+                    debe - haber,
+                    2,
+                    MidpointRounding.AwayFromZero);
+
+            /*
+             * TOTAL.
+             */
+            ws.Cell(fila, 4).Value = "TOTAL";
+            ws.Cell(fila, 5).Value = debe;
+            ws.Cell(fila, 6).Value = haber;
+
+            ws.Range(fila, 4, fila, 6)
+                .Style.Font.SetBold();
+
+            ws.Range(fila, 5, fila, 6)
+                .Style.NumberFormat.Format =
+                    "$ #,##0.00";
+
+            fila++;
+
+            /*
+             * ESTADO / DIFERENCIA.
+             */
+            ws.Cell(fila, 4).Value =
+                diferencia == 0m
+                    ? "CUADRADO"
+                    : "DESCUADRADO";
+
+            ws.Cell(fila, 5).Value =
+                "DIFERENCIA";
+
+            ws.Cell(fila, 6).Value =
+                diferencia;
+
+            ws.Cell(fila, 6)
+                .Style.NumberFormat.Format =
+                    "$ #,##0.00";
+
+            XLColor fondo =
+                diferencia == 0m
+                    ? XLColor.FromHtml("#EAF6EE")
+                    : XLColor.FromHtml("#FFF0EF");
+
+            XLColor fuente =
+                diferencia == 0m
+                    ? XLColor.FromHtml("#18783A")
+                    : XLColor.FromHtml("#B42318");
+
+            ws.Range(fila, 4, fila, 6)
+                .Style.Fill
+                .SetBackgroundColor(fondo);
+
+            var rangoEstado =ws.Range(fila, 4, fila, 6);
+
+            rangoEstado.Style.Fill.BackgroundColor = fondo;
+
+            rangoEstado.Style.Font.FontColor = fuente;
+
+            rangoEstado.Style.Font.Bold = true;
+
+            return fila;
+        }
+
+        private static void CrearTransferenciasDiarios(
+    XLWorkbook workbook,
+    DiariosCierreDto cierre)
+        {
+            IXLWorksheet ws =
+                workbook.Worksheets
+                    .Add("Transferencias");
+
+            int fila = 1;
+
+            ws.Cell(fila, 1).Value =
+                "TRANSFERENCIAS DE COSTOS DE PRODUCCIÓN";
+
+            ws.Range(fila, 1, fila, 6)
+                .Merge();
+
+            AplicarTituloPrincipal(
+                ws.Range(fila, 1, fila, 6));
+
+            fila++;
+
+            ws.Cell(fila, 1).Value = "Período";
+            ws.Cell(fila, 2).Value =
+                cierre.strPeriodoTexto;
+
+            fila += 2;
+
+            foreach (
+                DiarioTransferenciaCierreDto diario
+                in cierre.objTransferenciaGif.lstDiarios)
+            {
+                fila =
+                    PintarDiarioTransferencia(
+                        ws,
+                        fila,
+                        diario);
+
+                fila += 2;
+            }
+
+            ws.SheetView.FreezeRows(1);
+
+            ws.Column(1).Width = 14;
+            ws.Column(2).Width = 18;
+            ws.Column(3).Width = 12;
+            ws.Column(4).Width = 55;
+            ws.Column(5).Width = 18;
+            ws.Column(6).Width = 18;
+
+            ws.Columns(5, 6)
+                .Style.NumberFormat.Format =
+                    "$ #,##0.00";
+        }
+        private static void CrearResumenDiarios(
+    XLWorkbook workbook,
+    DataGeneralRequest request,
+    DiariosCierreDto cierre)
+        {
+            IXLWorksheet ws =
+                workbook.Worksheets.Add("Resumen");
+
+            ws.Cell(1, 1).Value =
+                string.IsNullOrWhiteSpace(request.title)
+                    ? "DIARIOS DE CIERRE DE COSTOS"
+                    : request.title;
+
+            ws.Range(1, 1, 1, 4).Merge();
+
+            ws.Cell(1, 1).Style
+                .Font.SetBold()
+                .Font.SetFontSize(15)
+                .Font.SetFontColor(
+                    XLColor.FromHtml("#196AA5"));
+
+            ws.Cell(3, 1).Value = "Período";
+            ws.Cell(3, 2).Value = cierre.strPeriodoTexto;
+
+            ws.Cell(4, 1).Value = "Generación";
+            ws.Cell(4, 2).Value = cierre.intIdGeneracion;
+
+            ws.Cell(5, 1).Value = "Estado";
+            ws.Cell(5, 2).Value = cierre.strEstado;
+
+            ws.Cell(7, 1).Value =
+                "Base de cálculo";
+
+            ws.Cell(7, 2).Value =
+                cierre.objTransferenciaGif.dcBaseCalculo;
+
+            ws.Cell(8, 1).Value =
+                "Gasto indirecto a transferir";
+
+            ws.Cell(8, 2).Value =
+                cierre.objTransferenciaGif.dcTotalGastoIndirecto;
+
+            ws.Cell(10, 1).Value =
+                "Diarios de transferencia";
+
+            ws.Cell(10, 2).Value =
+                cierre.objTransferenciaGif
+                    .lstDiarios.Count;
+
+            ws.Cell(11, 1).Value =
+                "Diarios de retorno";
+
+            ws.Cell(11, 2).Value =
+                cierre.objRetornos
+                    .lstDiarios.Count;
+
+            ws.Range("A3:A11")
+                .Style.Font.SetBold();
+
+            ws.Range("B7:B8")
+                .Style.NumberFormat.Format =
+                    "$ #,##0.00";
+
+            ws.Columns(1, 2)
+                .AdjustToContents();
+        }
+
+        public async Task<DataGeneralResult> DataGeneralExcelHojas(DataGeneralRequest dataGeneralRequest, List<(string strNombreHoja, DataTable objTabla)> lstHojas)
+        {
+            try
+            {
+                using var objLibro = new XLWorkbook();
+                foreach (var (strNombreHoja, objTabla) in lstHojas)
+                {
+                    var objRequest = new DataGeneralRequest { title = dataGeneralRequest.title, title2 = dataGeneralRequest.title2, sp = dataGeneralRequest.sp, modelParam = dataGeneralRequest.modelParam };
+                    DataGeneralResult objResultado = await DataGeneralExcel(objRequest, objTabla);
+                    if (!objResultado.Success) return objResultado;
+                    using var objStream = new MemoryStream(objResultado.Data);
+                    using var objLibroHoja = new XLWorkbook(objStream);
+                    int intParte = 0;
+                    foreach (var objHoja in objLibroHoja.Worksheets) { intParte++; objHoja.CopyTo(objLibro, intParte == 1 ? strNombreHoja : $"{strNombreHoja} {intParte}"); }
+                }
+                using var objSalida = new MemoryStream();
+                objLibro.SaveAs(objSalida);
+                return new DataGeneralResult { Success = true, Data = objSalida.ToArray() };
+            }
+            catch (Exception ex)
+            {
+                return new DataGeneralResult { Success = false, Message = ex.Message };
             }
         }
 
@@ -226,6 +872,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                         int rowEnd = Math.Min(rowStart + maxRowsPerSheet, totalRows);
 
                         // Llenar datos
+                        bool blCostoVentaUni = dataGeneralRequest.sp?.StartsWith("costo-venta-uni", StringComparison.OrdinalIgnoreCase) == true;
                         for (int i = rowStart; i < rowEnd; i++)
                         {
                             var row = dataTable.Rows[i];
@@ -280,7 +927,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                                 else
                                                 {
                                                     cell.Value = number;
-                                                    cell.Style.NumberFormat.Format = "#,##0.00";
+                                                    cell.Style.NumberFormat.Format = blCostoVentaUni && _hshColumnasCostoPorLibra.Contains(dataGeneralRequest.columnas[j]) ? "#,##0.0000" : "#,##0.00";
                                                 }
                                                 break;
 

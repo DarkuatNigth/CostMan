@@ -5,6 +5,7 @@ using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagement.Infraestructura.Repository.Interface;
 using CostManagement.Infraestructura.Utils;
+using CostManagementService.Aplicacion.DTos;
 using CostManagementService.Aplicación.DTos;
 using CostManagementService.Dominio.Entidades;
 using CostManagementService.Infraestructura.EF_Core;
@@ -27,6 +28,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -390,7 +392,7 @@ namespace CostManagement.Infraestructura.Repository.Services
             }
         }
 
-        private async Task<List<ParamRectrac>> ObtenerInfoRectractiladoXLote(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        public async Task<List<ParamRectrac>> ObtenerInfoRectractiladoXLote(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
             try
             {
@@ -412,33 +414,81 @@ namespace CostManagement.Infraestructura.Repository.Services
             DateOnly dtFechaInicio,
             DateOnly dtFechaFin)
         {
-            return await (
-                from dret in objContext.TbDetalleRetractilado.AsNoTracking()
-                join pro in objContext.TbProduc.AsNoTracking() on dret.CodProd equals pro.ProCodcor
-                join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
-                join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
-                where dret.Cajas > 0 &&
-                  dret.FecCrea >= dtFechaInicio.ToDateTime(TimeOnly.MinValue) &&
-                  dret.FecCrea < dtFechaFin.AddDays(1).ToDateTime(TimeOnly.MinValue)
-                group new { med, emb, dret } by new
-                {
-                    Fecha = dret.FecCrea.HasValue ? dret.FecCrea.Value.Date : (DateTime?)null,
-                    dret.CodProd,
-                    dret.Lote,
-                    dret.CodTal,
-                    emb.EmbPeso,
-                    med.MedFactor
-                } into d
-                select new ParamRectrac
-                (
-                    d.Key.CodProd,
-                    d.Key.Lote,
-                    d.Key.CodTal,
-                    d.Sum(x => x.dret.CajasRetra),
-                    d.Key.EmbPeso,
-                    d.Key.MedFactor
-                )
-                ).ToListAsync();
+
+            return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+
+                        // ── PASO 1: ejecutar SQL raw y obtener DTOs ──
+                        var lstLbsProc = await objContext.Database
+                            .SqlQueryRaw<ParamRectrac>(
+                                new ValueObjects().strRetractilado,
+                                new SqlParameter("@feIni", dtFechaInicio),
+                                new SqlParameter("@feFin", dtFechaFin)
+                            )
+                            .AsNoTracking()
+                            .ToListAsync();
+                        lstLbsProc.ForEach(r => r.InitKey());
+                        return lstLbsProc;
+                    }
+                    );
+                        //await (
+                        //from dret in objContext.TbDetalleRetractilado.AsNoTracking()
+                        //join pro in objContext.TbProduc.AsNoTracking() on dret.CodProd equals pro.ProCodcor
+                        //join med in objContext.TbMedida.AsNoTracking() on pro.ProUnimed equals med.MedCodigo
+                        //join emb in objContext.TbEmbala.AsNoTracking() on pro.ProEmbala equals emb.EmbCodigo
+                        //where dret.Cajas > 0 &&
+                        //  dret.FecCrea >= dtFechaInicio.ToDateTime(TimeOnly.MinValue) &&
+                        //  dret.FecCrea < dtFechaFin.AddDays(1).ToDateTime(TimeOnly.MinValue)
+                        //group new { med, emb, dret } by new
+                        //{
+                        //    Fecha = dret.FecCrea.HasValue ? dret.FecCrea.Value.Date : (DateTime?)null,
+                        //    dret.CodProd,
+                        //    dret.Lote,
+                        //    dret.CodTal,
+                        //    emb.EmbPeso,
+                        //    med.MedFactor
+                        //} into d
+                        //select new ParamRectrac
+                        //(
+                        //    d.Key.CodProd,
+                        //    d.Key.Lote,
+                        //    d.Key.CodTal,
+                        //    d.Sum(x => x.dret.CajasRetra),
+                        //    d.Key.EmbPeso,
+                        //    d.Key.MedFactor
+                        //)
+                        //).ToListAsync();
+                    }
+
+        private static string NormalizarClaseProducto(string? strClase) =>
+            (strClase ?? string.Empty).Trim().ToUpperInvariant() switch { "A+" => "A", "N" => "B", var x => x };
+
+        private static bool EsClaseProductoValida(string? strClase) => NormalizarClaseProducto(strClase) is "A" or "B" or "C";
+
+        /// <summary>
+        /// Completa desde tb_produc SOLO los campos vacíos o inválidos de la clasificación PFR (Clas01, Clas05, Clas03 y Clas02) cuando el SP los trae mal. No mapea clase vacía a C:
+        /// si tb_produc no tiene una clase A/B/C válida, el campo queda como estaba y el diagnóstico de Warren la registra.
+        /// </summary>
+        private async Task CompletarClasificacionPfrXProduc(CostManagementDbContext objContext, List<LiquidacionResultado> lstLiquidaciones)
+        {
+            List<LiquidacionResultado> lstPendientes = lstLiquidaciones.Where(x => x.intCodProd.HasValue && x.intCodProd.Value > 0 && (string.IsNullOrWhiteSpace(x.strProClas01) || string.IsNullOrWhiteSpace(x.strProClas05) || string.IsNullOrWhiteSpace(x.strProClas03) || !EsClaseProductoValida(x.strProClas02))).ToList();
+            if (lstPendientes.Count == 0) return;
+            List<string> lstCodigos = lstPendientes.Select(x => x.intCodProd!.Value.ToString()).Distinct().ToList();
+            List<TbProduc> lstProductos = await objContext.TbProduc.AsNoTracking().WhereInBatchAsync(x => x.ProCodcor, lstCodigos);
+            Dictionary<string, TbProduc> dicProductos = lstProductos.GroupBy(x => x.ProCodcor.Trim()).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            int intCompletadas = 0, intSinProducto = 0;
+            foreach (LiquidacionResultado objLiq in lstPendientes)
+            {
+                if (!dicProductos.TryGetValue(objLiq.intCodProd!.Value.ToString(), out TbProduc? objProduc)) { intSinProducto++; continue; }
+                if (string.IsNullOrWhiteSpace(objLiq.strProClas01) && !string.IsNullOrWhiteSpace(objProduc.ProClas01)) objLiq.strProClas01 = objProduc.ProClas01.Trim();
+                if (string.IsNullOrWhiteSpace(objLiq.strProClas05) && !string.IsNullOrWhiteSpace(objProduc.ProClas05)) objLiq.strProClas05 = objProduc.ProClas05.Trim();
+                if (string.IsNullOrWhiteSpace(objLiq.strProClas03) && !string.IsNullOrWhiteSpace(objProduc.ProClas03)) objLiq.strProClas03 = objProduc.ProClas03.Trim();
+                if (!EsClaseProductoValida(objLiq.strProClas02) && EsClaseProductoValida(objProduc.ProClas02)) objLiq.strProClas02 = objProduc.ProClas02.Trim();
+                intCompletadas++;
+            }
+            _objLogger.LogInformation("[DiagWarrenDiario] Clasificación PFR completada en origen: pendientes={Pendientes} completadas={Completadas} sinProductoEnTbProduc={SinProducto}", lstPendientes.Count, intCompletadas, intSinProducto);
         }
 
         public async Task<List<LiquidacionResultado>> ObtenerMatPrimValFrsXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin, bool blValorizada = true)
@@ -463,29 +513,48 @@ namespace CostManagement.Infraestructura.Repository.Services
                         var lstTotalResultados = DataReaderMapper.MapToList<LiquidacionResultado>(reader);
                         lstTotalResultados = lstTotalResultados.Where(obj => obj.strTipoLiq == "LIQ_PFR").ToList();
                         lstTotalResultados.ForEach(r => r.InitializeKeys(enmTipoMerge.Fresco));
+                        await CompletarClasificacionPfrXProduc(objContext, lstTotalResultados);
                         var lstInfoRetracti = await ObtenerInfoRectractiladoXLoteCore(objContext, dtFechaInicio, dtFechaFin);
                         var dictRetra = ParamRectrac.ConstruirDictParamRectracFrs(lstInfoRetracti);
 
+                        var dictRetraXProdTal = lstInfoRetracti
+                                .GroupBy(r => r.objProdTal)
+                                .ToDictionary(
+                                    g => g.Key,
+                                    g => g.Sum(x => x.dcLibrasRetra)
+                                );
+
+                        // Denominador de fresco por PRODUCTO + TALLA.
+                        // Se consideran todas las líneas frescas de ese producto+talla.
                         var dictDenominadores = lstTotalResultados
-                            .Where(r => dictRetra.ContainsKey(r.objLotkey))
-                            .GroupBy(r => r.objLotkey)
-                            .ToDictionary(g => g.Key, g => g.Sum(r => r.dcLibras));
+                            .Where(r => dictRetraXProdTal.ContainsKey(r.objProdTal))
+                            .GroupBy(r => r.objProdTal)
+                            .ToDictionary(
+                                g => g.Key,
+                                g => g.Sum(r => r.dcLibras)
+                            );
 
                         foreach (var item in lstTotalResultados)
                         {
-                            //if (item.dcPrecioCompra != null)
-                            //{
-                            //    item.dcLiqPrecio = (decimal?)item.dcPrecioCompra;
-                            //    item.InitializePrecioCompraAndTotalDol();
-                            //}
-                            if ((item.dcLibrasRetractilado ?? 0) != 0) continue;
-                            if (!dictRetra.TryGetValue(item.objLotkey, out var cola)) continue;
-                            if (!cola.TryPeek(out var info)) continue;
-                            if (!dictDenominadores.TryGetValue(item.objLotkey, out double dcTotalLibrasGrupo)) continue;
-                            if (dcTotalLibrasGrupo == 0) continue;
+                            if ((item.dcLibrasRetractilado ?? 0m) != 0m) continue;
 
-                            decimal dcPorcentaje = (decimal)item.dcLibras / (decimal)dcTotalLibrasGrupo;
-                            item.dcLibrasRetractilado = Math.Round(dcPorcentaje * info.dcLibrasRetra, 2);
+                            if (!dictRetraXProdTal.TryGetValue(item.objProdTal,out decimal dcTotalRetraGrupo))
+                                continue;
+
+                            if (!dictDenominadores.TryGetValue(item.objProdTal,out double dcTotalLibrasGrupo))
+                                continue;
+
+                            if (dcTotalLibrasGrupo <= 0)
+                                continue;
+
+                            decimal dcPorcentaje =(decimal)item.dcLibras /(decimal)dcTotalLibrasGrupo;
+
+                            decimal dcRetraCalculado =Math.Round( dcPorcentaje * dcTotalRetraGrupo,2);
+
+                            item.dcLibrasRetractilado =Math.Min( dcRetraCalculado,(decimal)item.dcLibras);
+
+                            item.blRetractilado =
+                                (item.dcLibrasRetractilado ?? 0m) > 0m;
                         }
                         return lstTotalResultados;
                     });
@@ -940,8 +1009,8 @@ namespace CostManagement.Infraestructura.Repository.Services
                             intCtuNumero = g.First().intCtuNumero,
                             strProCodCor = g.Key.strProCodCor,
                             intEftItem = g.Key.intEftItem,
-                            strEstadoFicha = g.Where(x => x.dbPrecioUnit != 0).First().strEstadoFicha,
-                            dtFechaEgreso = g.First().dtFechaEgreso,
+                            strEstadoFicha = g.FirstOrDefault(x => (x.dbPrecioUnit ?? 0d) > 0d)?.strEstadoFicha ?? "X",
+                            dtFechaEgreso = g.FirstOrDefault(x => (x.dbPrecioUnit ?? 0d) > 0d)?.dtFechaEgreso ?? default,
                             strEftGrupo = g.First().strEftGrupo,
                             dbEftCantidad = g.Key.dbEftCantidad,
                             dbPrecioUnit = g.Average(x => x.dbPrecioUnit),
@@ -1057,8 +1126,8 @@ namespace CostManagement.Infraestructura.Repository.Services
                             intCtuNumero = g.First().intCtuNumero,
                             strProCodCor = g.Key.strProCodCor,
                             intEftItem = g.Key.intEftItem,
-                            strEstadoFicha = g.Where(x => x.dbPrecioUnit != 0).First().strEstadoFicha,
-                            dtFechaEgreso = g.First().dtFechaEgreso,
+                            strEstadoFicha = g.FirstOrDefault(x => (x.dbPrecioUnit ?? 0d) > 0d)?.strEstadoFicha ?? "X",
+                            dtFechaEgreso = g.FirstOrDefault(x => (x.dbPrecioUnit ?? 0d) > 0d)?.dtFechaEgreso ?? default,
                             strEftGrupo = g.First().strEftGrupo,
                             dbEftCantidad = g.Key.dbEftCantidad,
                             dbPrecioUnit = g.Average(x => x.dbPrecioUnit),
@@ -1189,27 +1258,81 @@ namespace CostManagement.Infraestructura.Repository.Services
                     async objContext =>
                     {
                         var lstCodigosFichas = lstInfoCierreTun
-                            .Select(pr => pr.intEftItem.ToString());
-                        var lstCostoPromedio = await (
-                                    from cab in objContext.TbCabmov2.AsNoTracking()
-                                    join det in objContext.TbDetmov2.AsNoTracking() on cab.MovNummov equals det.DetCabece
-                                    join bod in objContext.TbBodega.AsNoTracking() on det.DetBodega equals bod.BodCodigo
-                                    where cab.MovTipo == "EGR"
-                                       && (bod.BodConsiderarCostoMaterial ?? "") == "S"
-                                    select new { det.DetCodart, cab.MovFecha, det.DetPreuni }
-                                ).SelectManyBatchAsync(
-                                    keySelector: x => x.DetCodart,
-                                    values: lstCodigosFichas,
-                                    selector: filtered => filtered
-                                        .GroupBy(x => x.DetCodart)
-                                        .Select(g => g.OrderByDescending(x => x.MovFecha).First())
-                                        .Select(res => new
-                                        {
-                                            IteCodigo = res.DetCodart.Trim(),
-                                            Fecha = res.MovFecha,
-                                            CostoProm = res.DetPreuni
-                                        })
-                                );
+                            .Select(pr => pr.intEftItem.ToString()).Distinct().ToList();
+
+                        //var lstCostoPromedio = await (
+                        //    from cab in objContext.TbCabmov1.AsNoTracking()
+                        //    join det in objContext.TbDetmov1.AsNoTracking()
+                        //         on new { A = cab.MovNummov, B = cab.MovTipo } equals new { A = det.DetCabece, B = "CO" }
+                        //    where cab.MovEstado != "AN"
+                        //    select new
+                        //    {
+                        //        DetCodart = det.DetCodart,
+                        //        MovFecha = cab.MovFecha,
+                        //        DetPreuni = det.DetPreuni,
+                        //        MovPordes = cab.MovPordes
+                        //    }
+                        //).SelectManyBatchAsync(
+                        //    keySelector: x => x.DetCodart,
+                        //    values: lstCodigosFichas,
+                        //    batchSelector: filtered => filtered.Select(x => new
+                        //    {
+                        //        x.DetCodart,
+                        //        x.MovFecha,
+                        //        x.DetPreuni,
+                        //        x.MovPordes
+                        //    }),
+                        //    selector: items => items
+                        //        .GroupBy(x => x.DetCodart)
+                        //        .Select(g => g.OrderByDescending(x => x.MovFecha).First())
+                        //        .Select(res => new
+                        //        {
+                        //            IteCodigo = res.DetCodart.Trim(),
+                        //            Fecha = res.MovFecha,
+                        //            CostoProm = res.MovPordes != null && res.MovPordes != 0
+                        //                ? res.DetPreuni - (res.DetPreuni * res.MovPordes.Value) / 100.0
+                        //                : res.DetPreuni
+                        //        })
+                        //);
+
+                       var lstCostoPromedio = await (
+                                from cab in objContext.TbCabmov2.AsNoTracking()
+                                join det in objContext.TbDetmov2.AsNoTracking()
+                                    on cab.MovNummov equals det.DetCabece
+                                join bod in objContext.TbBodega.AsNoTracking()
+                                    on det.DetBodega equals bod.BodCodigo
+                                where cab.MovTipo == "EGR"
+                                   && (bod.BodConsiderarCostoMaterial ?? "") == "S"
+                                select new
+                                {
+                                    DetCodart = det.DetCodart,
+                                    MovFecha = cab.MovFecha,
+                                    DetPreuni = det.DetPreuni
+                                }
+                            )
+                            .SelectManyBatchAsync(
+                                keySelector: x => x.DetCodart,
+                                values: lstCodigosFichas,
+                                batchSelector: filtered =>
+                                    filtered.Select(x => new
+                                    {
+                                        x.DetCodart,
+                                        x.MovFecha,
+                                        x.DetPreuni
+                                    }),
+                                selector: items => items
+                                    .Where(x =>
+                                        !string.IsNullOrWhiteSpace(x.DetCodart))
+                                    .GroupBy(x => x.DetCodart.Trim())
+                                    .Select(g =>
+                                        g.OrderByDescending(x => x.MovFecha)
+                                         .First())
+                                    .Select(res => new
+                                    {
+                                        IteCodigo = res.DetCodart.Trim(),
+                                        Fecha = res.MovFecha,
+                                        CostoProm = res.DetPreuni
+                                    }));
                         var costosLookup = lstCostoPromedio
                             .ToLookup(x => x.IteCodigo);
                         foreach (var producto in lstInfoCierreTun)
@@ -1220,7 +1343,13 @@ namespace CostManagement.Infraestructura.Repository.Services
                             {
                                 producto.dbPrecioUnit = costo.CostoProm;
                                 producto.strEstadoFicha = "M";
+                                if (!string.IsNullOrWhiteSpace(costo.Fecha) &&
+                                    DateTime.TryParse(costo.Fecha, out var fechaMov2))
+                                {
+                                    producto.dtFechaEgreso = DateOnly.FromDateTime(fechaMov2);
+                                }
                             }
+
                         }
                     });
             }
@@ -1686,7 +1815,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                                 lstProc.RtCodItem,
                                 lstProc.LbsCajasRetra,
                                 lstProc.Peso,
+                                lstProc.TipoPelado,
+                                lstProc.MaquinaPelado,
                                 lstProc.BodCodigo,
+                                lstProc.BodDescri,
                                 lstProc.EmbCodigo,
                                 lstProc.MedCodigo,
                                 lstProc.CantCajas,
@@ -1696,13 +1828,13 @@ namespace CostManagement.Infraestructura.Repository.Services
                                 lstProc.BlDescabezado,
                                 lstProc.ProCongela,
                                 lstProc.RecPorSal,
-                                lstProc.RecPorHid
+                                lstProc.RecPorHid,
+                                lstProc.LidClasificadora,
+                                lstProc.Clasificadora,
+                                lstProc.strTipoEmbal
                             )
                             ).ToList();
 
-                        //_objLogger.LogInformation($"\nCantidad final de lineas lstTotalLibrasRecProc: {lstTotalLibrasRecProc.Count}" +
-                        //    $"\nCantidad de libras recibidas lstLibrasRecibidas: {lstLibrasRecibidas.Count}"
-                        //    );
                         return lstTotalLibrasRecProc;
                     });
             }
@@ -1758,7 +1890,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                         RtCodItem: x.RtCodItem,
                         lbsRetractilado: x.LbsCajasRetra,
                         PesoPelado: x.Peso,
+                        TipoPelado: x.TipoPelado,
+                        MaquinaPelado: x.MaquinaPelado,
                         BodCod: x.BodCodigo,
+                        BodDescri: x.BodDescri,
                         EmbCodigo: x.EmbCodigo,
                         MedCodigo: (decimal)x.MedCodigo,
                         CantCaja: x.CantCajas,
@@ -1768,7 +1903,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                         esDescabezado: x.BlDescabezado,
                         proCongela: x.ProCongela,
                         PorSal: x.RecPorSal,
-                        PorHid: x.RecPorHid
+                        PorHid: x.RecPorHid,
+                        LidClasificadora: x.LidClasificadora,
+                        Clasificadora: x.Clasificadora,
+                        TipEmbala: x.strTipoEmbal
                     ))
                     .ToList();
                 return lstLbsProcesadas;
@@ -1801,42 +1939,6 @@ namespace CostManagement.Infraestructura.Repository.Services
                             .AsNoTracking()
                             .ToListAsync();
 
-                        var lstInfoRetracti = await ObtenerInfoRectractiladoXLoteCore(objContext, dtFechaInicio, dtFechaFin);
-                        lstLbsProc.ForEach(item => item.ConstruirKey());
-                        var dictRetra = ParamRectrac.ConstruirDictParamRectracFrs(lstInfoRetracti);
-                        var dictDenominadores = lstLbsProc
-                                .Where(r => dictRetra.ContainsKey(r.objRpckey))
-                                .GroupBy(r => r.objRpckey)
-                                .ToDictionary(
-                                    g => g.Key,
-                                    g => g.Sum(r => r.Procesado)
-                                );
-                        foreach (var item in lstLbsProc)
-                        {
-
-                            if (item.LbsCajasRetra != 0 || item.TipCodigo == "B1") continue; // ya tiene valor, se respeta
-
-                            if (item.TipCodigo == "CAM" &&
-                                (item.LotObservacion ?? "").Contains("REQUERIMIENTO DE PRODUCTO ETIQUETEO SOBRANTE AUTOMATICO"))
-                            {
-                                //_objLogger.LogInformation($"ReporteReproPlanRecibProc Secuencial/Lote {item.LotNumero}/{item.LoteUnificado} |  " +
-                                //    $"Etiqueteo : {item.LotObservacion}  | ");
-                                continue;
-                            }
-
-                            if (!dictRetra.TryGetValue(item.objRpckey, out var cola)) continue;
-
-                            // Peek en lugar de Dequeue — el único elemento no se consume
-                            if (!cola.TryPeek(out var info)) continue;
-
-                            if (!dictDenominadores.TryGetValue(item.objRpckey, out double dcTotalLibrasGrupo)) continue;
-
-                            if (dcTotalLibrasGrupo == 0) continue; // evitar división por cero
-
-                            decimal dcPorcentaje = (decimal)item.Procesado / (decimal)dcTotalLibrasGrupo;
-                            item.LbsCajasRetra = Math.Round(dcPorcentaje * info.dcLibrasRetra, 2);
-                            item.blRetractilado = true;
-                        }
                         return lstLbsProc;
                     });
             }
@@ -1846,6 +1948,38 @@ namespace CostManagement.Infraestructura.Repository.Services
                 throw;
             }
         }
+
+        public async Task<List<MuestrasObsequiosDto>> ObtenerMuestrasObsequios(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        {
+            try
+            {
+                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                    _objContextFactory,
+                    async objContext =>
+                    {
+                        // El SQL compara contra convert(varchar, trc_fecha, 111) => formato yyyy/MM/dd
+                        string strDesde = dtFechaInicio.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture);
+                        string strHasta = dtFechaFin.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture);
+
+                        var lstMuestrasObsequios = await objContext.Database
+                            .SqlQueryRaw<MuestrasObsequiosDto>(
+                                new ValueObjects().strMuestrasObsequios,
+                                new SqlParameter("@desde", SqlDbType.VarChar, 10) { Value = strDesde },
+                                new SqlParameter("@hasta", SqlDbType.VarChar, 10) { Value = strHasta }
+                            )
+                            .AsNoTracking()
+                            .ToListAsync();
+
+                        return lstMuestrasObsequios;
+                    });
+            }
+            catch (Exception objException)
+            {
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(ObtenerMuestrasObsequios), objException);
+                throw;
+            }
+        }
+
         public async Task<ILookup<(string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<string> lstCodProd)
         {
             try
@@ -2495,6 +2629,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     pro.ProDesesp,
                                     pro.ProClas01,
                                     pro.ProClas02,
+                                    pro.ProClas03,
                                     pro.ProClas05,
                                     pro.ProCodigo,
                                     ProcDescri = pres.ProDescri,
@@ -2522,6 +2657,8 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     strProCodcor = x.ProCodcor,
                                     strProDesesp = x.ProDesesp,
                                     strProClas01 = x.ProClas01,
+                                    strProClas02 = x.ProClas02,
+                                    strProClas03 = x.ProClas03,
                                     strProClas05 = x.ProClas05,
                                     strProdDescri = x.ProcDescri,
                                     strProCod = x.ProCodigo,
@@ -3376,7 +3513,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                           && trc.TrcFecha <= dtFeFin
                                           && trc.TrcEstado == "ac"
                                           && trc.TrcIngegr == "E"
-                                          && trc.TrcTipo != "EX"
+                                          //&& trc.TrcTipo != "EX"
                                        //&& !new List<string>() {"EX", "IVA", "IBR", "CNEI", "RMC",
                                        //    "IRP", "LAB", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", /*"REPROE", "DIR",*/
                                        //    "IAT", "CC", "D4", "DEV","IQ", "LB" }.Contains(trc.TrcTipo)
@@ -3705,9 +3842,26 @@ namespace CostManagement.Infraestructura.Repository.Services
 
         public async Task<List<InfoProd>> ObtenerInfoProd(List<string> lstProdCod)
         {
+            List<InfoProd> lstInfoProd;
+            List<TbTarifaDecoradosRetractilado> lstTarDecRec;
+            List<TbTarifaProceso> lstTarPelado;
             try
             {
-                return await ManejoContext<CostManagementDbContext>.EjecutarAsync(
+                lstTarDecRec = await ManejoContext<CostosDbContext>.EjecutarAsync(
+                    _objCostosFactory,
+                    async objContext =>
+                    {
+                         return await objContext.TbTarifaDecoradosRetractilado.AsNoTracking()
+                            .ToListAsync();
+                    });
+                lstTarPelado = await ManejoContext<CostosDbContext>.EjecutarAsync(
+                    _objCostosFactory,
+                    async objContext =>
+                    {
+                        return await objContext.TbTarifaProceso.AsNoTracking()
+                           .ToListAsync();
+                    });
+                lstInfoProd = await ManejoContext<CostManagementDbContext>.EjecutarAsync(
                     _objContextFactory,
                     async objContext =>
                     {
@@ -3718,6 +3872,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                                 values: lstProdCod,
                                 selector: filtered =>
                                     from pro in filtered
+                                    join med in objContext.TbMedida.AsNoTracking()
+                                        on pro.ProUnimed equals med.MedCodigo
+                                    join emb in objContext.TbEmbala.AsNoTracking()
+                                        on pro.ProEmbala equals emb.EmbCodigo
                                     join pres in objContext.TbProces.AsNoTracking()
                                         on pro.ProClas06 equals pres.ProCodigo
                                     join detProc in objContext.TbDetproces.AsNoTracking()
@@ -3727,23 +3885,15 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     into detProcGroup
                                     from detProc in detProcGroup.DefaultIfEmpty()
                                     select new InfoProd
-                                    {
-                                        strProCodcor = pro.ProCodcor.Trim(),
-                                        strProDesesp = pro.ProDesesp,
-                                        strProClas01 = pro.ProClas01,
-                                        strProClas02 = pro.ProClas02,
-                                        strProClas03 = pro.ProClas03,
-                                        strProClas05 = pro.ProClas05,
-                                        strProCodigo = pro.ProCodigo,
-                                        strProDescri = pres.ProDescri,
-                                        strDprDescri = detProc.DprDescri
-                                    }
-                            );
+                                    (pro, pres, detProc.DprDescri, emb, med.MedCodigo, lstTarDecRec, lstTarPelado)
+                             );
                     });
+
+                return lstInfoProd;
             }
             catch (Exception objException)
             {
-                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(ObtenerInfoCodTal), objException);
+                ManejoLog<MateriaPrima>.Error(_objLogger, nameof(MateriaPrima), nameof(ObtenerInfoProd), objException);
                 throw;
             }
         }

@@ -1,7 +1,9 @@
 ﻿using CostManagement.Aplicación.DTos;
 using CostManagement.Dominio.Entidades;
 using CostManagementService.Aplicacion.DTos;
+using CostManagementService.Dominio.Entidades;
 using CostManagementService.Infraestructura.EF_Core.SONG;
+using Newtonsoft.Json;
 using System.Collections.Concurrent;
 
 namespace CostManagement.Dominio.Reglas
@@ -26,6 +28,8 @@ namespace CostManagement.Dominio.Reglas
         private const int _intDecimalesCu = 4;   // 4 decimales para costo unitario
         private const int _intDecimalesCt = 2;   // 2 decimales para costo total
         private readonly ILogger _objLogger;
+        // Acumulación por punto y nivel; se emite una vez al terminar la valorización.
+        private readonly Dictionary<(string strPunto, string strNivel), (decimal dcTotal, decimal dcLibras, decimal dcDelta, int intDosDecimales)> _dicPrecision = new();
         private enum FuenteCosto { Ninguna, Frs, Rpc, Sld }
 
 
@@ -34,39 +38,43 @@ namespace CostManagement.Dominio.Reglas
             _objLogger = logger;
         }
         public void AsignarCostRecibiXFrsMovCam(
-            List<PrecioFrsXMov> lstPrecioLiqOtrProc,
-            List<PrecioFrsXMov> lstPrecioFrsXMovCam,
             DataProcesoParam objDataProceso)
         {
 
             if (objDataProceso.lstLiqRepro == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqRepro));
-            if (lstPrecioLiqOtrProc == null) throw new ArgumentNullException(nameof(lstPrecioLiqOtrProc));
-            if (lstPrecioFrsXMovCam == null) throw new ArgumentNullException(nameof(lstPrecioFrsXMovCam));
             if (objDataProceso.lstLiqFresco == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqFresco));
             // Lógica de diccionarios
-            var dictCostoProdXTalla = LiquidacionResultado.GenerarDiccionarioCostoXTalla(objDataProceso.lstLiqFresco);
-            //var dictLiqOtrCostoProdXTalla = PrecioFrsXMov.GenerarDiccionarioCostoXTalla(lstPrecioLiqOtrProc);
-            //var dictLiqMovCamCostoProdXTalla = PrecioFrsXMov.GenerarDiccionarioCostoXTalla(lstPrecioFrsXMovCam);
-
+            var dictCostoProdXTalla = LiquidacionResultado.GenerarDiccionarioCostoXTallaParaReproceso(objDataProceso.lstLiqFresco);
+            // Anterior sin diagnóstico: var dictCostoInvProdXLote = InventarioVal.GenerarDiccionarioCostoXTalla(objDataProceso.lstInvenVal);
+            var dictCostoInvProdXLote = InventarioVal.GenerarDiccionarioCostoXTalla(objDataProceso.lstInvenVal, _objLogger);
+            var dicFuenteFrs = objDataProceso.lstLiqFresco.GroupBy(x => x.objLotkey).ToDictionary(g => g.Key,
+                g => (dcTotal: g.Sum(x => x.dcTotalCostoWarren ?? x.dcTotalDolSum), dcLibras: g.Sum(x => (decimal)x.dcLibras)));
+            var dicFuenteInv = objDataProceso.lstInvenVal.Where(x => x.objLotkey != null).GroupBy(x => x.objLotkey).ToDictionary(g => g.Key,
+                g => (dcTotal: g.Sum(x => x.dcCostoTot), dcLibras: g.Sum(x => x.dcLibras)));
             var lstMatPrimaRpcFilt = MatPrimaReproceso.GenerarLstFiltRec(objDataProceso.lstLiqRepro);
             foreach (var liq in lstMatPrimaRpcFilt)
             {
-                var keyBuscada = (liq.intLoteOrigen, liq.intCodProd, liq.intCodTal);
-                var strNivel = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(liq.strTipCod));
-
+                var keyBuscada = new LoteFrsKey(liq.intLoteOrigen, liq.intCodProd, liq.intCodTal);
+                var strNivel = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(liq.strTipCod, objDataProceso.dicNivelesCosteoRuntime));
                 // Aplicar jerarquía de precios
                 if (dictCostoProdXTalla.TryGetValue(keyBuscada, out var precioPromedio))
                 {
-                    AsignarPrecio(liq, (decimal)precioPromedio, NIVEL_DEFECTO);
+                    //LiquidacionResultado objLiq = objDataProceso.lstLiqFresco.Where(x => x.objLotkey == keyBuscada).FirstOrDefault()!;
+                    // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                    // AsignarPrecio(liq, (decimal)precioPromedio, NIVEL_DEFECTO);
+                    var objFuenteFrs = dicFuenteFrs[keyBuscada];
+                    if (objFuenteFrs.dcLibras != 0m) AsignarPrecioPorTotal(liq, objFuenteFrs.dcTotal, objFuenteFrs.dcLibras, NIVEL_DEFECTO);
+                    else AsignarPrecio(liq, precioPromedio ?? 0m, NIVEL_DEFECTO);
                 }
-                //else if (dictLiqOtrCostoProdXTalla.TryGetValue(keyBuscada, out var precioOtroProc))
-                //{
-                //    AsignarPrecio(liq, (decimal)precioOtroProc, strNivel);
-                //}
-                //else if (dictLiqMovCamCostoProdXTalla.TryGetValue(keyBuscada, out var precioMovCam))
-                //{
-                //    AsignarPrecio(liq, (decimal)precioMovCam, strNivel);
-                //}
+                else if (dictCostoInvProdXLote.TryGetValue(keyBuscada, out var precioInv))
+                {
+
+                    // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                    // AsignarPrecio(liq, (decimal)precioInv, NIVEL_DEFECTO);
+                    var objFuenteInv = dicFuenteInv[keyBuscada];
+                    if (objFuenteInv.dcLibras != 0m) AsignarPrecioPorTotal(liq, objFuenteInv.dcTotal, objFuenteInv.dcLibras, NIVEL_DEFECTO);
+                    else AsignarPrecio(liq, precioInv, NIVEL_DEFECTO);
+                }
                 else
                 {
                     liq.strNivel = strNivel; // Asignar nivel aunque no haya precio
@@ -74,11 +82,102 @@ namespace CostManagement.Dominio.Reglas
             }
         }
 
+        public void AsignarRetractiladoRepro(DataProcesoParam objDataProceso)
+        {
+            List<string> lstProcExclui = new List<string> { "CAM" };
+            try
+            {
+                if (objDataProceso.lstLiqRepro == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqRepro));
+                if (objDataProceso.lstLiqFresco == null) throw new ArgumentNullException(nameof(objDataProceso.lstLiqFresco));
+                // PASO 1: Total retractilado de base por PRODUCTO+TALLA (todos los lotes juntos)
+                var dictRetraTotalPT = objDataProceso.lstInfoRetrac
+                    .GroupBy(r => new LoteRpcKeyXProdTal(r.intCodProd, r.intCodTal))
+                    .ToDictionary(g => g.Key, g => g.Sum(x => x.dcLibrasRetra));
+                var debugBase5690 = objDataProceso.lstInfoRetrac
+                .Where(x => x.intCodProd == 5690)
+                .Select(x => new
+                {
+                    x.intLote,
+                    x.intCodProd,
+                    x.intCodTal,
+                    x.dcLibrasRetra
+                })
+                .ToList();
+
+                 _objLogger.LogWarning(
+                                "RETRACTILADO BASE 5690 => {Data}",
+                                JsonConvert.SerializeObject(debugBase5690)
+                            );
+
+                // PASO 2 (fuente resta): lo que fresco ya asigno, por PRODUCTO+TALLA
+                var dictRetraFrescoPT = objDataProceso.lstLiqFresco
+                    .Where(x => x.blRetractilado)
+                    .GroupBy(x => x.objProdTal)
+                    .ToDictionary(g => g.Key, g => g.Sum(x => x.dcLibrasRetractilado ?? 0));
+
+                var lstProcesado = objDataProceso.lstLiqRepro
+                    .Where(x => x.strAgrupacion == "2. PROCESADO"
+                             && !lstProcExclui.Contains(x.strTipCod))
+                    .ToList();
+
+                // PASO 3 (denominador): Σ libras PROCESADO por PRODUCTO+TALLA
+                var dictDenomPT = lstProcesado
+                    .GroupBy(x => x.objProdTalKey)
+                    .ToDictionary(g => g.Key, g => g.Sum(x => (decimal)x.dbLibras));
+                foreach (var liq in lstProcesado)
+                {
+                    if (liq.blRetractilado == true)
+                    {
+                        liq.dcLibrasRetractilado = (decimal)liq.dbLibras;
+                    }
+                    else
+                    {
+                        var keyPT = liq.objProdTalKey;
+
+                        // No existe retractilado base para este producto+talla.
+                        if (!dictRetraTotalPT.TryGetValue(keyPT, out decimal dcTotalBase))
+                            continue;
+
+                        // Lo que ya absorbió fresco.
+                        decimal dcYaFresco = dictRetraFrescoPT.TryGetValue(keyPT, out decimal fresco) ? fresco : 0m;
+
+                        // Lo que realmente queda para reproceso.
+                        decimal dcRemanente = dcTotalBase - dcYaFresco;
+
+                        if (dcRemanente <= 0m) continue;
+
+                        // Total de libras PROCESADO que pueden absorber
+                        // ese remanente.
+                        if (!dictDenomPT.TryGetValue(keyPT, out decimal dcLibrasPT))
+                            continue;
+
+                        if (dcLibrasPT <= 0m)
+                            continue;
+
+                        decimal dcPorcentaje = (decimal)liq.dbLibras / dcLibrasPT;
+
+                        decimal dcRetraCalc = Math.Round(dcPorcentaje * dcRemanente, 2);
+
+                        // Cap físico.
+                        liq.dcLibrasRetractilado = Math.Min(dcRetraCalc, (decimal)liq.dbLibras);
+
+                        liq.blRetractilado = (liq.dcLibrasRetractilado ?? 0m) > 0m;
+                    }
+                }
+            }
+            catch(Exception ex)
+            {
+                _objLogger.LogError(ex, "Error en AsignarRetractiladoRepro");
+                throw;
+            }
+        }
+
 
         public void EjecutarAsignacionPorSaldo(
             List<MatPrimaReproceso> lstMatPrimaReproceso,
             ILookup<(string, short), decimal> lstPreciosProm,
-            ILookup<LoteRpcKeyReci, decimal> lstPrecios)
+            ILookup<LoteRpcKeyReci, decimal> lstPrecios,
+            IReadOnlyDictionary<string, int> mapaNiveles)
         {
             if (lstMatPrimaReproceso == null) throw new ArgumentNullException(nameof(lstMatPrimaReproceso));
             if (lstPreciosProm == null) throw new ArgumentNullException(nameof(lstPreciosProm));
@@ -88,7 +187,7 @@ namespace CostManagement.Dominio.Reglas
             LoteRpcKeyReci objKeyBusqueda = new LoteRpcKeyReci(186650, 5883, 7);
             foreach (var objLiq in lstMatPrimaRpcFilt)
             {
-                var strNivel = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(objLiq.strTipCod));
+                var strNivel = NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(objLiq.strTipCod, mapaNiveles));
 
                 // Regla 1: Talla Especial
                 if (_lstProdReproSinTal.Contains(objLiq.intCodProd) && _lstTallaEspecial.Contains(objLiq.intCodTal))
@@ -108,20 +207,12 @@ namespace CostManagement.Dominio.Reglas
                 {
                     AsignarPrecio(objLiq, objPrecioLote.Average(), strNivel);
                 }
-                var objPrecioProm = lstPreciosProm[keyPreProm];
-                //if (objPrecioProm.Any() && objLiq.dbCostoXSecuencial == 0)
-                //{
-                //    AsignarPrecio(objLiq, objPrecioProm.Average(), strNivel);
-                //}
-                //else
-                //{
-                    // No se encontró precio, asignar nivel aunque no haya precio
-                    objLiq.strNivel = strNivel;
-                //}
+                // No se encontró precio, asignar nivel aunque no haya precio
+                objLiq.strNivel = strNivel;
             }
         }
 
-        public void RendimientoReproPlanRecibProc(List<MatPrimaReproceso> lstTotalLibrasRecProc)
+        public void RendimientoReproPlanRecibProc(List<MatPrimaReproceso> lstTotalLibrasRecProc, IReadOnlyDictionary<string, int> mapaNiveles)
         {
             if (lstTotalLibrasRecProc == null) throw new ArgumentNullException(nameof(lstTotalLibrasRecProc));
             decimal dcCostoProc, dcCostTotalProc, dcCostoTotalMatEmp, dcTotalDol;
@@ -166,11 +257,16 @@ namespace CostManagement.Dominio.Reglas
                 if (objLiq.strAgrupacion != "2. PROCESADO" || objLiq.dbLibras <= 0) continue;
 
                 // ── Cálculos que SIEMPRE se ejecutan ──
-                dcCostTotalProc = (objLiq.dcCostTotalProc ?? 0m);
-                dcCostoTotalMatEmp = (objLiq.dcCostoTotalMatEmp ?? 0m);
-                dcTotalDol = (decimal)objLiq.dbCostoTotal;
-                dcCostoProc = (objLiq.dcTarifaProc ?? 0m);
-                objLiq.dcTotalDolSum = dcCostTotalProc + dcCostoTotalMatEmp + dcTotalDol + dcCostoProc;
+                // ===== VERSION ANTERIOR (comentada para referencia) - 2026-10-02 =====
+                // dcCostTotalProc = (objLiq.dcCostTotalProc ?? 0m);
+                // dcCostoTotalMatEmp = (objLiq.dcCostoTotalMatEmp ?? 0m);
+                // dcTotalDol = (decimal)objLiq.dbCostoTotal;
+                // dcCostoProc = (objLiq.dcTarifaProc ?? 0m);
+                // objLiq.dcTotalDolSum = dcCostTotalProc + dcCostoTotalMatEmp + dcTotalDol + dcCostoProc;
+
+                // NUEVO: costo completo vía helper compartido (evita que TransferirPrecioFuente
+                // reciba dcTotalDolSum=0 — ver docs/superpowers/plans/2026-10-02-transferencia-costo-dctotaldolsum.md).
+                objLiq.dcTotalDolSum = MatPrimaReproceso.CalcularCostoTotalDolSum(objLiq);
 
                 // ── BIFURCACIÓN ──
                 if (objLiq.dcCostoTotXLibra == null)
@@ -178,6 +274,7 @@ namespace CostManagement.Dominio.Reglas
                     // RAMA A: Sin valor en base → calcular dcCostoTotXLibra normalmente
                     objLiq.dcCostoTotXLibra = Math.Truncate(
                         (objLiq.dcTotalDolSum / (decimal)objLiq.dbLibras) * 100m) / 100m;
+                    _objLogger.LogDebug("[MotorAsignacionPrecios][CostoXLibra] PROCESADO intLotNumero={intLotNumero} intLoteUnificado={intLoteUnificado} intCodProd={intCodProd} intCodTal={intCodTal} dcCostTotalProc={dcCostTotalProc} dcCostoTotalMatEmp={dcCostoTotalMatEmp} dbCostoTotal={dbCostoTotal} dcTarifaProc={dcTarifaProc} dcTotalDolSum={dcTotalDolSum} dbLibras={dbLibras} dcCostoTotXLibra={dcCostoTotXLibra}", objLiq.intLotNumero, objLiq.intLoteUnificado, objLiq.intCodProd, objLiq.intCodTal, objLiq.dcCostTotalProc, objLiq.dcCostoTotalMatEmp, objLiq.dbCostoTotal, objLiq.dcTarifaProc, objLiq.dcTotalDolSum, objLiq.dbLibras, objLiq.dcCostoTotXLibra);
                     // dbCostoXSecuencial conserva el valor que le asignó el grafo/prorrateo
                 }
                 else if (objLiq.dbCostoXSecuencial == 0)
@@ -185,7 +282,9 @@ namespace CostManagement.Dominio.Reglas
                     // RAMA B: dcCostoTotXLibra vino desde base Y el grafo no corrió
                     //         (ruta intermediaria liviana)
                     //         → asignar dbCostoXSecuencial desde el valor de base
-                    objLiq.dbCostoXSecuencial = (decimal)objLiq.dcCostoTotXLibra;
+                    // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                    // objLiq.dbCostoXSecuencial = (decimal)objLiq.dcCostoTotXLibra;
+                    objLiq.dbCostoXSecuencial = Math.Round(objLiq.dcTotalDolSum / (decimal)objLiq.dbLibras, 4);
                 }
                 // RAMA C (implícita): dcCostoTotXLibra != null Y dbCostoXSecuencial != 0
                 //   → ambos valores existen (base + grafo), se conservan tal cual
@@ -202,6 +301,11 @@ namespace CostManagement.Dominio.Reglas
             // PROCESADO del rango, sin distinguir lote). El PROCESADO consumidor
             // se refresca en un punto fijo acotado (K pasadas), sin re-ejecutar
             // MotorGrafoTopologico ni MotorProrrateo.
+            //
+            // Solo se completa el RECIBIDO que todavía no tiene precio propio
+            // (dbCostoXSecuencial == 0). Antes se pisaba también el RECIBIDO ya
+            // costeado por MovCam/Saldo/grafo con este promedio global,
+            // duplicando/alterando un precio que ya era correcto por lote.
             // ═════════════════════════════════════════════════════════════════
             const int intMaxPasadasFullCost = 5;
             const decimal dcTolConvergencia = 0.01m;
@@ -209,22 +313,35 @@ namespace CostManagement.Dominio.Reglas
             var lstElegiblesRecibido = lstTotalLibrasRecProc.Where(x =>
                     x.strAgrupacion == "1. RECIBIDO"
                  && !x.blExcluidoCosteo
-                 && !NivelCosteo.AplicaMetodoEspecial(x.strTipCod)
+                 && !NivelCosteo.AplicaMetodoEspecial(x.strTipCod, mapaNiveles)
                  && !string.Equals(x.strTipCod?.Trim(), "LB04", StringComparison.OrdinalIgnoreCase)
                  && x.dbLibras > 0)
                 .ToList();
 
+            // Acumula, a través de todas las pasadas, cuáles RECIBIDO recibieron
+            // el precio de referencia acá (y no de MovCam/Saldo/grafo), para que
+            // la FASE 3 reconcilie solo contra esos.
+            var lstRecibidoTocadosFase2 = new List<MatPrimaReproceso>();
+
             for (int intPasada = 1; intPasada <= intMaxPasadasFullCost; intPasada++)
             {
                 var dictRef = MatPrimaReproceso.GenerarPromedioFullCostGlobal(lstTotalLibrasRecProc);
+                var dicTotalesRef = lstTotalLibrasRecProc.Where(x => x.strAgrupacion == "2. PROCESADO" && x.dbLibras > 0)
+                    .GroupBy(x => x.objProdTalKey).ToDictionary(g => g.Key, g => (dcTotal: g.Sum(x => x.dcTotalDolSum), dcLibras: g.Sum(x => (decimal)x.dbLibras)));
 
                 var lotesAfectados = new HashSet<LoteRpcKeyXSec>();
                 foreach (var rec in lstElegiblesRecibido)
                 {
+                    if (rec.dbCostoXSecuencial != 0) continue;
+
                     if (dictRef.TryGetValue(rec.objProdTalKey, out decimal dcPrecioRef) && dcPrecioRef > 0)
                     {
-                        AsignarPrecio(rec, dcPrecioRef, null);
+                        // Anterior: reemplazado para valorar desde totales sin perder precisión.
+                        // AsignarPrecio(rec, dcPrecioRef, null);
+                        var objFuenteRef = dicTotalesRef[rec.objProdTalKey];
+                        AsignarPrecioPorTotal(rec, objFuenteRef.dcTotal, objFuenteRef.dcLibras, null);
                         lotesAfectados.Add(rec.objLoteKey);
+                        lstRecibidoTocadosFase2.Add(rec);
                     }
                 }
 
@@ -239,7 +356,7 @@ namespace CostManagement.Dominio.Reglas
                         x.strAgrupacion == "2. PROCESADO"
                      && lotesAfectados.Contains(x.objLoteKey)
                      && x.dbLibras > 0
-                     && !NivelCosteo.AplicaMetodoEspecial(x.strTipCod)))
+                     && !NivelCosteo.AplicaMetodoEspecial(x.strTipCod, mapaNiveles)))
                 {
                     // Los PROCESADO con método especial (UNI, R7, CDI) no usan prorrateo
                     // estándar dbCostoTotal_RECIBIDO/libras_PROCESADO; se excluyen del
@@ -267,15 +384,22 @@ namespace CostManagement.Dominio.Reglas
                 if (dcMaxDelta <= dcTolConvergencia) break;
             }
 
+            // ===== VERSION ANTERIOR (comentada para referencia) - 2026-10-03 =====
+            /*
             // ═════════════════════════════════════════════════════════════════
             // FASE 3 — Validador de reconciliación (obligatorio): por cada
             // prod+talla reutilizado, el residual entre lo producido y lo
             // consumido solo puede provenir de libras producidas no consumidas,
             // nunca del método de cálculo.
+            //
+            // Reconcilia solo contra el RECIBIDO que la FASE 2 realmente tocó
+            // (lstRecibidoTocadosFase2), no contra "cualquiera con costo > 0":
+            // desde que la FASE 2 dejó de pisar el RECIBIDO ya costeado por su
+            // propio lote (MovCam/Saldo/grafo), ese RECIBIDO puede tener un
+            // precio distinto a dcAvg sin que sea un descuadre de método.
             // ═════════════════════════════════════════════════════════════════
             var dictRefFinal = MatPrimaReproceso.GenerarPromedioFullCostGlobal(lstTotalLibrasRecProc);
-            var lookupConsumido = lstElegiblesRecibido
-                .Where(x => x.dbCostoXSecuencial > 0)
+            var lookupConsumido = lstRecibidoTocadosFase2
                 .ToLookup(x => x.objProdTalKey);
             var lookupProducido = lstTotalLibrasRecProc
                 .Where(x => x.strAgrupacion == "2. PROCESADO" && x.dbLibras > 0)
@@ -309,6 +433,51 @@ namespace CostManagement.Dominio.Reglas
                 if (dictRefFinal.TryGetValue(rec.objProdTalKey, out decimal dcAvgFinal))
                     rec.dcValidador = dcAvgFinal - rec.dbCostoXSecuencial;
             }
+            */
+            ReconciliarPromedioGlobalRpc(lstTotalLibrasRecProc, lstRecibidoTocadosFase2, lstElegiblesRecibido, dcTolConvergencia);
+        }
+
+        private void ReconciliarPromedioGlobalRpc(List<MatPrimaReproceso> lstTotalLibrasRecProc, List<MatPrimaReproceso> lstRecibidoTocadosFase2, List<MatPrimaReproceso> lstElegiblesRecibido, decimal dcTolConvergencia)
+        {
+            var dictRefFinal = MatPrimaReproceso.GenerarPromedioFullCostGlobal(lstTotalLibrasRecProc);
+            var lookupConsumido = lstRecibidoTocadosFase2
+                .ToLookup(x => x.objProdTalKey);
+            var lookupProducido = lstTotalLibrasRecProc
+                .Where(x => x.strAgrupacion == "2. PROCESADO" && x.dbLibras > 0)
+                .ToLookup(x => x.objProdTalKey);
+
+            foreach (var kvpRef in dictRefFinal)
+            {
+                var objProdTal = kvpRef.Key;
+                decimal dcAvg = kvpRef.Value;
+                decimal dcProducidoLbs = (decimal)lookupProducido[objProdTal].Sum(x => x.dbLibras);
+                decimal dcProducidoDol = lookupProducido[objProdTal].Sum(x => x.dcTotalDolSum);
+                decimal dcConsumidoLbs = (decimal)lookupConsumido[objProdTal].Sum(x => x.dbLibras);
+
+                decimal dcResidualCalc = dcProducidoDol - dcAvg * dcConsumidoLbs;
+                decimal dcResidualIdeal = dcAvg * (dcProducidoLbs - dcConsumidoLbs);
+                bool blOkMetodo = Math.Abs(dcResidualCalc - dcResidualIdeal) <= dcTolConvergencia;
+
+                _objLogger.LogDebug(
+                    "[ReconcRPC][Totales] Prod={Prod} Tal={Tal} ProdLbs={ProdLbs} ProdDol={ProdDol} ConsLbs={ConsLbs}",
+                    objProdTal.ProdCod, objProdTal.Codtal, dcProducidoLbs, dcProducidoDol, dcConsumidoLbs);
+
+                _objLogger.LogInformation(
+                    "[ReconcRPC] Prod={Prod} Tal={Tal} ProdLbs={ProdLbs:F2} ConsLbs={ConsLbs:F2} " +
+                    "Avg={Avg:F4} Residual={Residual:F2} Ok={Ok}",
+                    objProdTal.ProdCod, objProdTal.Codtal, dcProducidoLbs, dcConsumidoLbs, dcAvg, dcResidualCalc, blOkMetodo);
+
+                if (!blOkMetodo)
+                    _objLogger.LogWarning(
+                        "[ReconcRPC] DESCUADRE POR MÉTODO Prod={Prod} Tal={Tal} ResidualCalc={Calc:F2} ResidualIdeal={Ideal:F2}",
+                        objProdTal.ProdCod, objProdTal.Codtal, dcResidualCalc, dcResidualIdeal);
+            }
+
+            foreach (var rec in lstElegiblesRecibido.Where(x => x.dbCostoXSecuencial > 0))
+            {
+                if (dictRefFinal.TryGetValue(rec.objProdTalKey, out decimal dcAvgFinal))
+                    rec.dcValidador = dcAvgFinal - rec.dbCostoXSecuencial;
+            }
         }
 
 
@@ -317,9 +486,55 @@ namespace CostManagement.Dominio.Reglas
             if (objLiq.blExcluidoCosteo && objLiq.strAgrupacion == "1. RECIBIDO") return; 
             objLiq.dbCostoXSecuencial = Math.Round(precio, 4);
             objLiq.dbCostoTotal = Math.Round(precio * (decimal)objLiq.dbLibras, 2);
-            if (nivel != null) objLiq.strNivel = nivel;        
+            if (nivel != null) objLiq.strNivel = nivel;
+            AcumularPrecision(objLiq, precio, "AsignarPrecio");
         }
 
+
+        public void AsignarPrecioPorTotal(MatPrimaReproceso objLiq, decimal dcTotalFuente, decimal dcLibrasFuente, string nivel)
+        {
+            if (objLiq.blExcluidoCosteo && objLiq.strAgrupacion == "1. RECIBIDO") return;
+            if (dcLibrasFuente == 0m) return; // Sin denominador no se sustituye el costo existente.
+            decimal dcLibras = (decimal)objLiq.dbLibras;
+            objLiq.dbCostoTotal = Math.Round(dcTotalFuente * dcLibras / dcLibrasFuente, 2);
+            objLiq.dbCostoXSecuencial = dcLibras == 0m ? 0m : Math.Round(objLiq.dbCostoTotal / dcLibras, 4);
+            if (nivel != null) objLiq.strNivel = nivel;
+            AcumularPrecision(objLiq, dcTotalFuente / dcLibrasFuente, "AsignarPrecioPorTotal");
+        }
+
+        private void AcumularPrecision(MatPrimaReproceso objLiq, decimal dcPrecio, string strPunto)
+        {
+            if (!DiagnosticoPrecision.blActivo) return;
+            lock (_dicPrecision)
+            {
+                var objKey = (strPunto, objLiq.strNivel ?? "SIN NIVEL");
+                var objAcum = _dicPrecision.GetValueOrDefault(objKey);
+                _dicPrecision[objKey] = (objAcum.dcTotal + objLiq.dbCostoTotal, objAcum.dcLibras + (decimal)objLiq.dbLibras,
+                    objAcum.dcDelta + objLiq.dbCostoTotal - objLiq.dbCostoXSecuencial * (decimal)objLiq.dbLibras,
+                    objAcum.intDosDecimales + (DiagnosticoPrecision.EsUnitarioDosDecimales(dcPrecio) ? 1 : 0));
+            }
+            if (DiagnosticoPrecision.EsSeguimiento(objLiq.intLotNumero, objLiq.intCodProd, objLiq.intCodTal)
+                || DiagnosticoPrecision.EsSeguimiento(objLiq.intLoteUnificado, objLiq.intCodProd, objLiq.intCodTal)
+                || DiagnosticoPrecision.EsSeguimiento(objLiq.intLoteOrigen, objLiq.intCodProd, objLiq.intCodTal))
+                _objLogger.LogInformation("[DiagPrecision] {Punto} Nivel={Nivel} Lote={Lote} Unificado={Unificado} Prod={Prod} Talla={Talla} Tipo={Tipo} TipoLiq={TipoLiq} Libras={Libras} CostoUnit={Unit} CostoTot={Total}",
+                    strPunto, objLiq.strNivel, objLiq.intLotNumero, objLiq.intLoteUnificado, objLiq.intCodProd, objLiq.intCodTal,
+                    objLiq.strAgrupacion == "1. RECIBIDO" ? "E" : "I", objLiq.strTipCod, objLiq.dbLibras, objLiq.dbCostoXSecuencial, objLiq.dbCostoTotal);
+        }
+
+        public void RegistrarResumenPrecision()
+        {
+            lock (_dicPrecision)
+            {
+                foreach (var objPunto in _dicPrecision.GroupBy(x => x.Key.strPunto))
+                {
+                    foreach (var objFila in objPunto)
+                        _objLogger.LogInformation("[DiagPrecision] {Punto} Nivel={Nivel} TotalAsignado={Total} Libras={Libras} FilasUnitarioHasta2Dec={DosDecimales} Delta={Delta}",
+                            objFila.Key.strPunto, objFila.Key.strNivel, objFila.Value.dcTotal, objFila.Value.dcLibras, objFila.Value.intDosDecimales, objFila.Value.dcDelta);
+                    DiagnosticoPrecision.Diferencia(_objLogger, objPunto.Key, objPunto.Sum(x => x.Value.dcDelta));
+                }
+                _dicPrecision.Clear();
+            }
+        }
 
         public void AsignarCostHidra(List<CostoMovArtDto> lstCostoPromedio, List<MatPrimaReproceso> lstTotalLibrasRecProc)
         {
@@ -677,7 +892,9 @@ namespace CostManagement.Dominio.Reglas
         private static void AplicarCosto(DiarioCosto objDiario, decimal dcCostoXLibra)
         {
             objDiario.dcCostoUnit = Truncar(dcCostoXLibra, _intDecimalesCu);
-            objDiario.dcCostoTot = Truncar(dcCostoXLibra * objDiario.dcLibras, _intDecimalesCt);
+            // Anterior: reemplazado para valorar desde totales sin perder precisión.
+            // objDiario.dcCostoTot = Truncar(dcCostoXLibra * objDiario.dcLibras, _intDecimalesCt);
+            objDiario.dcCostoTot = Math.Round(dcCostoXLibra * objDiario.dcLibras, _intDecimalesCt);
         }
         private static decimal Truncar(decimal valor, int decimales)
         {
@@ -731,6 +948,32 @@ namespace CostManagement.Dominio.Reglas
             {
                 throw new Exception($"Error en [{nameof(AsignarCostVentUnitDiarioVenta)}] ERROR : {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Costo de venta de ventas vs facturas con el costo global por CodProd + Talla (calculado SIN las exportaciones).
+        /// Si el CodProd + Talla no tiene costo global se usa el promedio anterior (ConstruirDictPromCostUni) como respaldo.
+        /// </summary>
+        public void AsignarCostVentUnitGlobalDiarioVenta(List<CostVentUni> lstCostVentUni, Dictionary<(int intCodProd, int intCodTalla), decimal> dicCostoGlobal, List<RptVentaVsFactura> lstFactura, IReadOnlySet<int>? hshProdDiagnostico = null) // DIAGNÓSTICO TEMPORAL: parámetro opcional
+        {
+            try
+            {
+                ConcurrentDictionary<PromXProdTal, decimal> dicCostoVenta = CostVentUni.ConstruirDictPromCostUni(lstCostVentUni);
+                foreach (var objItem in lstFactura)
+                {
+                    decimal dcValorCosto = dicCostoGlobal.TryGetValue((objItem.intCodProd, objItem.intTalla), out decimal dcCostoGlobal) ? dcCostoGlobal : dicCostoVenta.GetValueOrDefault(new PromXProdTal(Convert.ToString(objItem.intCodProd), objItem.intTalla), 0m);
+                    if (dcValorCosto != 0m) AplicarCosto(objItem, dcValorCosto);
+                    // DIAGNÓSTICO TEMPORAL: borrar al cerrar la revisión de los productos 5359 y 3861
+                    // if (hshProdDiagnostico?.Contains(objItem.intCodProd) == true) // LOG DESACTIVADO (evitar ruido en el log)
+                    // { // LOG DESACTIVADO (evitar ruido en el log)
+                        // bool blTieneGlobal = dicCostoGlobal.TryGetValue((objItem.intCodProd, objItem.intTalla), out decimal dcGlobalDiagnostico); // LOG DESACTIVADO (evitar ruido en el log)
+                        // bool blTieneRespaldo = dicCostoVenta.TryGetValue(new PromXProdTal(Convert.ToString(objItem.intCodProd), objItem.intTalla), out decimal dcRespaldoDiagnostico); // LOG DESACTIVADO (evitar ruido en el log)
+                        // _objLogger.LogInformation("[Diag][DiarioCostoVenta] Tipo={strTipo} Fact={strFact} Prod={intCodProd} Talla={intTalla} Libras={dcLibras} | CUGlobal={CUGlobal} | Respaldo={Respaldo} | CostoVentaFinal={dcCostoVenta}", objItem.strTipo, objItem.strFact, objItem.intCodProd, objItem.intTalla, objItem.dcLibras, blTieneGlobal ? (object)dcGlobalDiagnostico : "NO", blTieneRespaldo ? (object)dcRespaldoDiagnostico : "NO", objItem.dcCostoVenta); // LOG DESACTIVADO (evitar ruido en el log)
+                        // if (!blTieneGlobal && !blTieneRespaldo) _objLogger.LogWarning("[Diag][DiarioCostoVenta] Prod={Prod} Talla buscada={Talla} no encontrada. Tallas disponibles=[{lista}]", objItem.intCodProd, objItem.intTalla, string.Join(",", lstCostVentUni.Where(x => x.intCodProd == objItem.intCodProd).Select(x => x.intCodTalla).Distinct())); // LOG DESACTIVADO (evitar ruido en el log)
+                    // } // LOG DESACTIVADO (evitar ruido en el log)
+                }
+            }
+            catch (Exception ex) { throw new Exception($"Error en [{nameof(AsignarCostVentUnitGlobalDiarioVenta)}] ERROR : {ex.Message}"); }
         }
 
         private static void AplicarCosto(RptVentaVsFactura objDiario, decimal dcCostoXLibra)

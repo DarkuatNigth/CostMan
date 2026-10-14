@@ -28,6 +28,8 @@ namespace CostManagement.Dominio.Entidades
     public sealed class CostosUnitarios
     {
         // Proceso Primario
+        [Column("Logistica")]
+        public decimal dcLogistica { get; init; }
         [Column("Recepcion")]
         public decimal dcRecepcion { get; init; }
 
@@ -57,6 +59,8 @@ namespace CostManagement.Dominio.Entidades
         [Column("Tunel")]
         public decimal dcTunel { get; init; }
         // Proceso Secundario
+        [Column("Descongelado")]
+        public decimal dcDescongelado { get; init; }
 
         [Column("Pelado")]
         public decimal dcPelado { get; init; }
@@ -94,6 +98,7 @@ namespace CostManagement.Dominio.Entidades
         ConcurrentDictionary<string, decimal> d) => new()
         {
             // Proceso Primario
+            dcLogistica = d.GetValueOrDefault("Logistica"),
             dcRecepcion = d.GetValueOrDefault("Recepcion"),
             dcClasificacion = d.GetValueOrDefault("Clasificacion"),
             dcCajas = d.GetValueOrDefault("Cajas"),
@@ -106,6 +111,7 @@ namespace CostManagement.Dominio.Entidades
             dcIQF = d.GetValueOrDefault("IQF"),
             dcTunel = d.GetValueOrDefault("Tunel"),
             // Proceso Secundario
+            dcDescongelado= d.GetValueOrDefault("Descongelado"),
             dcPelado = d.GetValueOrDefault("Pelado"),
             dcHidratacion = d.GetValueOrDefault("Hidratacion"),
             dcCocido = d.GetValueOrDefault("Cocido"),
@@ -131,24 +137,54 @@ namespace CostManagement.Dominio.Entidades
         IF OBJECT_ID('tempdb..#tmpPelado') IS NOT NULL 
             DROP TABLE #tmpPelado;
         
-        SELECT 
-            lot_numero  as lotNumero,
-            lot_rloNumero as rloNumero,
-	        (SELECT   SUM(PESO)   
-	        FROM dbo.tb_cabtrans A  
-	        INNER JOIN TB_DETRANS B ON A.NSECUENCIAL = B.Nsecuencial AND A.ID_780 = B.id_780  
-	        WHERE fecha>= DATEADD(DAY,-7,@feini)  and   LOTE= lot_rlonumero AND A.tra_secuencial= lot_numero     
-	        AND A.Tro_codigo='15' AND B.pro_codcor<> '3473') as  Peso  
-	    INTO #tmpPelado 
-	    FROM dbo.tb_lototr  
-	    INNER JOIN dbo.tb_tiplot ON lot_tiplot= tip_codigo  
-	    left JOIN tb_produc PR ON pro_codcor= lot_prodPed  
-	    LEFT JOIN TB_PROCES PP ON PP.pro_codigo= PRO_cLAS06 --AND PP.pro_pelado='S'  
-	    WHERE lot_tipo='va' 
-	        AND CONVERT(VARCHAR,lot_fecha,111) BETWEEN CONVERT(VARCHAR,@feini,111) and CONVERT(VARCHAR,@feifin  ,111)     
-	        AND lot_brutas>0  and lot_estado <> 'AN'  
-        group by lot_numero ,
-        lot_rloNumero;
+               WITH CTE_Transacciones AS (
+                SELECT 
+                    LOTE,
+                    A.tra_secuencial,
+                    SUM(B.PESO) AS Peso,
+                    MAX(B.det_codpes) AS CodMaq
+                FROM dbo.tb_cabtrans A  
+                INNER JOIN dbo.TB_DETRANS B 
+                    ON A.NSECUENCIAL = B.Nsecuencial 
+                   AND A.ID_780 = B.id_780  
+                WHERE A.fecha >= DATEADD(DAY, -7, @feini)  
+                  AND A.Tro_codigo = '15' 
+                  AND B.pro_codcor <> '3473'
+                GROUP BY LOTE, A.tra_secuencial
+            )
+            -- 2. Consulta principal con sintaxis corregida
+            SELECT 
+                L.lot_numero    AS lotNumero,
+                L.lot_rloNumero AS rloNumero,
+                T.Peso AS Peso,
+                T.CodMaq AS CodMaqPelado,
+                clas.cla_descripcion AS MaquinaPelado
+            ,CASE WHEN L.lot_esmaquina= 1 THEN 'PA' ELSE  'PM' END AS [TipPelado]
+            INTO #tmpPelado
+            FROM dbo.tb_lototr L
+            INNER JOIN dbo.tb_tiplot 
+                ON L.lot_tiplot = tip_codigo  
+            LEFT JOIN CTE_Transacciones T 
+                ON T.LOTE = L.lot_rloNumero 
+               AND T.tra_secuencial = L.lot_numero
+            LEFT JOIN dbo.tb_Clasificadora clas 
+                ON clas.cla_abrev = T.CodMaq
+            LEFT JOIN dbo.tb_produc PR 
+                ON PR.pro_codcor = L.lot_prodPed  
+            LEFT JOIN dbo.TB_PROCES PP 
+                ON PP.pro_codigo = PR.PRO_cLAS06  
+            WHERE L.lot_tipo = 'va' 
+              AND L.lot_fecha >= CAST(@feini AS DATETIME) 
+              AND L.lot_fecha < DATEADD(DAY, 1, CAST(@feifin AS DATETIME))
+              AND L.lot_brutas > 0  
+              AND L.lot_estado <> 'AN'  
+            GROUP BY 
+                L.lot_numero,
+                L.lot_rloNumero,
+                T.Peso,
+                T.CodMaq,
+                L.lot_esmaquina,
+                clas.cla_descripcion;
 
 
         delete from #tmpPelado where Peso is null;
@@ -228,6 +264,9 @@ namespace CostManagement.Dominio.Entidades
             )
         , 2)
          END AS [Peso]
+    ,peso.CodMaqPelado                                                   AS [CodMaquinaPelado]
+    ,peso.MaquinaPelado                                                  AS [MaquinaPelado]
+    ,peso.TipPelado                                                      AS [TipoPelado]
     --,MAX(COALESCE(retra.LbsCajasRetra, 0.0))                            AS [LbsCajasRetra]
     ,lot.lot_fecha                                                       AS [lot_fecha]
     ,litv.lid_produc                                                     AS [rld_prodcod]
@@ -265,6 +304,7 @@ namespace CostManagement.Dominio.Entidades
     ,CASE  WHEN MAX(CASE 
                 WHEN (lot.lot_tipo   = 'RE' AND lot.lot_tiplot = 'DE')
                   OR (lot.lot_tiplot = 'RLL' AND pro.pro_clas03 = 'PT')
+                  OR (lot.lot_tiplot = 'EPP' AND pro.pro_clas03 = 'PT' AND pro.pro_decora > 1)
                 THEN 1 ELSE 0 
              END) = 1 
     THEN CAST(1 AS bit) ELSE CAST(0 AS bit) 
@@ -275,6 +315,15 @@ namespace CostManagement.Dominio.Entidades
      END                                                                 AS [Retractilado]*/
     ,ROUND(COALESCE(SUM(litv.lid_canenv / emb.emb_cantid), 0.0), 2)     AS [CantCajas]
     ,MAX(bod.bod_codigo)                                                 AS [BodCodigo]
+    ,CASE 
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0 AND  med.med_codigo = 3 and (emb.emb_peso / med.med_kilo) > 4 then 'PANERA' 
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0 AND  med.med_codigo = 1 and (emb.emb_peso * med.med_kilo) > 4 then 'PANERA'
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0 AND  med.med_codigo = 3 and (emb.emb_peso / med.med_kilo) < 4 then 'FONDO' 
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0 AND  med.med_codigo = 1 and (emb.emb_peso * med.med_kilo) < 4 then 'FONDO'
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0  AND med.med_codigo = 2 and emb.emb_peso > 4 then 'PANERA' 
+    WHEN RTRIM(lot.lot_tipo) = 'BR' AND lot.lot_copack = 0  AND med.med_codigo = 2 and emb.emb_peso < 4 then 'FONDO'
+    ELSE NULL                                                          END AS [TIPO EMBAL]
+    ,MAX(bod.bod_descri)                                                 AS [BodDescri]
     ,MAX(emb.emb_codigo)                                                 AS [EmbCodigo]
     ,MAX(CAST(med.med_codigo AS int))                                    AS [MedCodigo]
     ,CAST(MAX(CAST(bod.bod_esBrine AS tinyint)) AS bit)                                 AS [BodEsBrine]
@@ -287,6 +336,8 @@ namespace CostManagement.Dominio.Entidades
     ,MAX(pro.pro_congela)                                                AS [ProCongela]
     ,MAX(COALESCE(prem.CertificadosConcat, '')) AS [Certificado]
     ,MAX(prem.TotalPremio) AS [LidPremio]
+    ,litv.lid_clasificadora                                              AS [lid_clasificadora]
+    ,isnull(clas.cla_descripcion, '')                                                      AS [Clasificadora]
 
 FROM tb_lototr lot WITH(NOLOCK)    
 INNER JOIN tb_liqvag liq WITH(NOLOCK) 
@@ -400,9 +451,10 @@ LEFT JOIN (
     ON  litv.lid_lote   = CAST(prem.lip_noliqu AS bigint)
     AND litv.lid_codtal = prem.lid_talla
     AND litv.lid_produc = prem.lid_producto
+LEFT JOIN dbo.tb_Clasificadora clas
+         ON litv.lid_clasificadora = clas.cla_abrev
 
-WHERE lot.lot_fecha BETWEEN @feini  
-                        AND @feifin
+WHERE CONVERT(char(10), lot.lot_fecha, 111) BETWEEN CONVERT(VARCHAR,@feini,111) and CONVERT(VARCHAR,@feifin  ,111)   
   AND lot.lot_estado <> 'AN'     
   AND liq.liq_estado = 'AC'
 
@@ -410,8 +462,9 @@ GROUP BY
      tp.tip_codigo, tp.tip_descri, lot.lot_tipo, lot.lot_copack
     ,tpc.Descripcion, lot.lot_numero, lot.lot_rloNumero
     ,lot.lot_recibi, lot.lot_proces, lot.lot_fecha
-    ,litv.lid_produc, litv.lid_codtal
-    ,pro.pro_desesp, tal.tal_descri, planta.pa_descri, detpres.dpr_descri
+    ,litv.lid_produc, litv.lid_codtal,peso.CodMaqPelado ,peso.MaquinaPelado, peso.TipPelado,  peso.Peso
+    ,pro.pro_desesp, tal.tal_descri, planta.pa_descri, detpres.dpr_descri,bod.bod_descri
+    ,clas.cla_descripcion,litv.lid_clasificadora  ,emb.emb_peso, med.med_kilo,med.med_codigo
     ,CASE 
         WHEN pro.pro_clas01 = 'CC' AND pro.pro_clas05 = 'EN' THEN 'ENTERO'    
         WHEN pro.pro_clas01 = 'SC' AND pro.pro_clas05 = 'SH' THEN 'COLA'    
@@ -421,6 +474,78 @@ GROUP BY
      END
 
 ";
+
+        public string strMuestrasObsequios = @"
+                SET NOCOUNT ON;
+                SET DATEFORMAT ymd;
+
+                SELECT  LTRIM(RTRIM(trc_tipo))   AS trc_tipo,
+                        trc_numsec, trc_fecha, trc_embfactura,
+                        trs_codigo,
+                        LTRIM(RTRIM(trs_descri)) AS trs_descri,
+                        tcd_lote,
+                        tal_codigo,
+                        tal_descri, pro_codcor, pro_desesp,
+                        LTRIM(RTRIM(pro_clas01)) AS pro_clas01,
+                        LTRIM(RTRIM(pro_clas02)) AS pro_clas02,
+                        LTRIM(RTRIM(pro_clas03)) AS pro_clas03,
+                        LTRIM(RTRIM(pro_clas04)) AS pro_clas04,
+                        LTRIM(RTRIM(pro_clas05)) AS pro_clas05,
+                        sum(tcd_cantid * emb_peso * med_factor) AS libras,
+                        sum(case when tcd_muestra = 'S'
+                                 then tcd_cantid * emb_peso * med_factor end) AS libras_muestra
+                INTO    #base_mov
+                FROM    produccion.dbo.tb_tracamAuto
+                        inner join produccion.dbo.tb_tracadauto on tcd_numero = trc_numsec
+                        inner join produccion.dbo.tb_produc     on pro_codcor = tcd_produc
+                        inner join produccion.dbo.tb_tallas     on tcd_codtal = tal_codigo
+                        inner join produccion.dbo.tb_medida     on med_codigo = pro_unimed
+                        inner join produccion.dbo.tb_embala     on pro_embala = emb_codigo
+                        inner join produccion.dbo.tb_transa     on trc_tipo = trs_codigo and trc_ingegr = trs_tipo
+                WHERE   convert(varchar,trc_fecha,111) >= @desde
+                  and   convert(varchar,trc_fecha,111) <= @hasta
+                  and  (trs_codigo = 'EOB' or tcd_muestra = 'S')
+                GROUP BY LTRIM(RTRIM(trc_tipo)), trc_numsec, trc_fecha, trc_embfactura,
+                         trs_codigo, LTRIM(RTRIM(trs_descri)), tcd_lote,
+                         tal_codigo, tal_descri, pro_codcor, pro_desesp,
+                         LTRIM(RTRIM(pro_clas01)), LTRIM(RTRIM(pro_clas02)), LTRIM(RTRIM(pro_clas03)),
+                         LTRIM(RTRIM(pro_clas04)), LTRIM(RTRIM(pro_clas05));
+
+                SELECT  trc_tipo, trs_descri, tcd_lote, trc_numsec, libras,
+                        tal_codigo, tal_descri, pro_codcor, pro_desesp,
+                        pro_clas01, pro_clas02, pro_clas03, pro_clas04, pro_clas05,
+                        CAST(NULL AS varchar(12))  AS emb_factura,
+                        CAST(NULL AS varchar(100)) AS cli_descripcion
+                INTO    #obsequios
+                FROM    #base_mov
+                WHERE   trs_codigo = 'EOB';
+
+                SELECT  b.trc_tipo, b.trs_descri, b.tcd_lote, b.trc_numsec, sum(b.libras_muestra) libras,
+                        b.tal_codigo, b.tal_descri, b.pro_codcor, b.pro_desesp,
+                        b.pro_clas01, b.pro_clas02, b.pro_clas03, b.pro_clas04, b.pro_clas05,
+                        pe.emb_factura, cl.cli_descripcion
+                INTO    #muestras
+                FROM    #base_mov b
+                        left join produccion.dbo.tb_progembarque pe
+                               on pe.emb_factura = concat(b.trc_embfactura, '/', year(b.trc_fecha))
+                              and pe.emb_estado <> 'N'
+                        inner join produccion.dbo.tb_cliente cl on cl.cli_codigo = pe.emb_cliente
+                WHERE   b.libras_muestra is not null
+                GROUP BY b.trc_tipo, b.trs_descri, b.tcd_lote, b.trc_numsec, b.tal_codigo, b.tal_descri,
+                         b.pro_codcor, b.pro_desesp,
+                         b.pro_clas01, b.pro_clas02, b.pro_clas03, b.pro_clas04, b.pro_clas05,
+                         pe.emb_factura, pe.emb_serie, pe.emb_nofactbce, cl.cli_descripcion;
+
+                SELECT trc_tipo, trs_descri, tcd_lote, trc_numsec, libras, tal_codigo, tal_descri,
+                       pro_codcor, pro_desesp, pro_clas01, pro_clas02, pro_clas03, pro_clas04, pro_clas05,
+                       emb_factura, cli_descripcion
+                FROM #obsequios
+                UNION ALL
+                SELECT trc_tipo, trs_descri, tcd_lote, trc_numsec, libras, tal_codigo, tal_descri,
+                       pro_codcor, pro_desesp, pro_clas01, pro_clas02, pro_clas03, pro_clas04, pro_clas05,
+                       emb_factura, cli_descripcion
+                FROM #muestras;
+                ";
 
         public string strRepTracamAuto { get; set; } = @"
 
@@ -562,5 +687,126 @@ WHERE (pd.pro_codcor IN ('5371') and a.tal_descri LIKE '%51/60%' ) OR (pd.pro_co
 
 
 ";
+
+
+        public string strRetractilado { get; set; } = @" 
+        
+            set dateformat ymd;
+
+          SELECT 
+                 cast(dret.cod_prod as int)                 AS CodProd
+                ,cast(dret.lote as int)                     AS Lote
+                ,cast(dret.cod_tal  as int)                 AS CodTal
+                ,SUM(CAST(COALESCE(dret.cajas_retra, 0.0)  * emb2.emb_peso * med2.med_factor AS decimal(18,2)))  AS LbsCajasRetra
+            FROM tb_DetalleRetractilado dret
+            INNER JOIN tb_produc pro2 ON dret.cod_prod    = pro2.pro_codcor
+            INNER JOIN tb_medida med2 ON pro2.pro_unimed   = med2.med_codigo
+            INNER JOIN tb_embala emb2 ON pro2.pro_embala   = emb2.emb_codigo
+            WHERE dret.cajas > 0.0 and  
+            CONVERT(char(10), dret.fec_crea, 111) BETWEEN    CONVERT(char(10), @feIni, 111) and CONVERT(char(10),  @feFin, 111)
+            GROUP BY dret.cod_prod, dret.lote, dret.cod_tal
+                 ,dret.fec_crea,emb2.emb_codigo;
+        ";
+    }
+
+    public static class ValueObjectsRetornoContenedor
+    {
+        public const string SqlNotasCreditoRetorno = @"
+SET DATEFORMAT ymd;
+
+SELECT
+    a.cpg_fecinv AS FECHA,
+    RTRIM(a.cpg_nroser) + '-' +
+    RTRIM(a.cpg_nroser2) + '-' +
+    RTRIM(a.cpg_refere) AS NUMERO,
+
+    b.cli_codigo AS COD_CLIENTE,
+    b.cli_nomcom AS CLIENTE,
+    c.mov_numdoc AS APLICAFACTURA,
+    c.mov_fecha AS FECHA_FACTURA_APLICADA,
+
+    CASE b.cli_TipCli
+        WHEN '2' THEN
+            CASE
+                WHEN (
+                    UPPER(ISNULL(a.cpg_ObservaDetalle,'')) LIKE 'DEVOLUCION%' OR
+                    UPPER(ISNULL(a.cpg_ObservaDetalle,'')) LIKE 'ANULACION%'
+                ) AND ISNULL(a.cpg_ncvalFob,0)=0
+                    THEN a.cpg_basecer
+                WHEN (
+                    UPPER(ISNULL(a.cpg_ObservaDetalle,'')) LIKE 'DEVOLUCION%' OR
+                    UPPER(ISNULL(a.cpg_ObservaDetalle,'')) LIKE 'ANULACION%'
+                ) AND ISNULL(a.cpg_ncvalFob,0)>0
+                    THEN a.cpg_ncvalFob
+                ELSE a.cpg_basecer
+            END
+        ELSE a.cpg_basecer
+    END AS BASE0,
+
+    ISNULL(a.cpg_ncvalFob,0) AS VALOR_FOB,
+    a.cpg_total AS TOTAL,
+    CONVERT(VARCHAR(1000),a.cpg_observ) AS CONCEPTO,
+    a.cpg_ObservaDetalle AS OBSERVACIONRIDE,
+    d.tde_tipo AS TIPDEU,
+    c.MOV_ORDPRO AS REFER,
+
+    CASE b.cli_TipCli
+        WHEN '1' THEN 'LOCAL'
+        WHEN '2' THEN 'EXTERIOR'
+        WHEN '3' THEN 'EMPLEADO'
+        ELSE 'OTRO'
+    END AS TIPO_CLIENTE,
+
+    pe.emb_factura AS REFERENCIA_EMBARQUE
+
+FROM song..tb_cobpag1 a WITH(NOLOCK)
+INNER JOIN song..tb_client b WITH(NOLOCK)
+    ON a.cpg_provee=b.cli_codigo
+INNER JOIN SONG.dbo.tb_tipdeu d WITH(NOLOCK)
+    ON d.tde_codigo=a.cpg_tipdeu
+LEFT JOIN song..tb_cabmov1 c WITH(NOLOCK)
+    ON c.mov_nummov=a.cpg_docAfecta
+   AND c.mov_tipo IN ('FA','EX','FE')
+LEFT JOIN PRODUCCION.dbo.tb_progembarque pe WITH(NOLOCK)
+    ON c.mov_numdoc=CONCAT(pe.emb_serie,'-',pe.emb_nofactbce)
+
+WHERE a.cpg_tipo='CC'
+  AND a.cpg_estado<>'AN'
+  AND a.cpg_fiscal='S'
+  AND d.tde_tipo='NC'
+  AND d.tde_modulo='CXC'
+  AND a.cpg_tipdeu<>'FAC'
+  AND b.cli_TipCli='2'
+  AND a.cpg_Fecinv BETWEEN @fein AND @fefi
+  AND
+  (
+      UPPER(ISNULL(a.cpg_ObservaDetalle,'')) LIKE '%DEVOLUCION DE CONTENEDOR%'
+      OR UPPER(ISNULL(a.cpg_ObservaDetalle,'')) LIKE '%DEVOLUCIÓN DE CONTENEDOR%'
+      OR UPPER(CONVERT(VARCHAR(1000),ISNULL(a.cpg_observ,''))) LIKE '%RETORNO DE CONTENEDOR%'
+  )
+ORDER BY a.cpg_fecinv,NUMERO;";
+    }
+
+    public static class DocumentoCostoKey
+    {
+        public static string SecuenciaFactura(string? factura)
+        {
+            if (string.IsNullOrWhiteSpace(factura))
+                return string.Empty;
+
+            string valor = factura.Trim();
+            string ultimo = valor.Contains('-')
+                ? valor.Split('-').LastOrDefault() ?? valor
+                : valor;
+
+            string digitos = new string(ultimo.Where(char.IsDigit).ToArray());
+
+            return long.TryParse(digitos, out long numero)
+                ? numero.ToString()
+                : digitos;
+        }
+
+        public static string IdentificadorFactura(string? factura) =>
+            $"FACT:{SecuenciaFactura(factura)}";
     }
 }
