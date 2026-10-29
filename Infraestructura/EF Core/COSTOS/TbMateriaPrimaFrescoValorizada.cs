@@ -101,4 +101,12 @@ public partial class TbMateriaPrimaFrescoValorizada
     [StringLength(60)]
     [Unicode(false)]
     public string? MfEquipoEli { get; set; }
+
+    [Column("mf_costoUnitarioWarren", TypeName = "numeric(18, 5)")]
+    public decimal? MfCostoUnitarioWarren { get; set; }
+
+    [Column("mf_costoTotalWarren", TypeName = "numeric(18, 5)")]
+    public decimal? MfCostoTotalWarren { get; set; }
+
+    public virtual ICollection<TbMateriaPrimaFrescoValorizadaDetalle> TbMateriaPrimaFrescoValorizadaDetalle { get; set; } = new List<TbMateriaPrimaFrescoValorizadaDetalle>();
 }

@@ -1,4 +1,4 @@
-﻿using CostManagement.Aplicación.DTos;
+using CostManagement.Aplicación.DTos;
 using CostManagement.Aplicación.Features;
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
@@ -7,6 +7,7 @@ using CostManagement.Infraestructura.Utils;
 using CostManagementService.Aplicacion.DTos;
 using CostManagementService.Aplicación.DTos;
 using CostManagementService.Aplicacion.Features;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -21,6 +22,7 @@ using System.Security.Cryptography;
 
 namespace CostManagement.API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("[controller]")]
     public class ReportingController : ControllerBase
@@ -41,17 +43,23 @@ namespace CostManagement.API.Controllers
             _excelService = excelService;
         }
 
-        [HttpGet("materia-prima")]
-        public async Task<IActionResult> GetMateriaPrimaReportAsync(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        [HttpPost("materia-prima")]
+        public async Task<IActionResult> GetMateriaPrimaReportAsync([FromBody] RangoFechasRequest objReq)
         {
+            DateOnly dtFechaInicio, dtFechaFin;
             try
             {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
                 List<LiquidacionResultado> lstTotalResultados = await _objCostoMateriaPrima.ObtenerLiquidacionValorizada(dtFechaInicio, dtFechaFin);
                 CostosUnitarios objCostUni = await _objCostoMateriaPrima.ObtenerValProcesoFrs(dtFechaInicio);
                 List<bool> lstBool = new List<bool> { true };
                 var dtResult = new DataTablesResultDto
                 {
-                    Table = lstTotalResultados.AListaDeDiccionarios(),
+                    Table = lstTotalResultados.AReporteMateriaPrima(),
                     Table3 = DataTablesResultDto.FromObject(objCostUni)
                 };
                 return Ok(new ApiResponse<DataTablesResultDto>
@@ -72,17 +80,22 @@ namespace CostManagement.API.Controllers
             }
         }
 
-        [HttpGet("materia-prima-Liq")]
-        public async Task<IActionResult> GetMateriaPrimaLiqReportAsync(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        [HttpPost("materia-prima-Liq")]
+        public async Task<IActionResult> GetMateriaPrimaLiqReportAsync([FromBody] RangoFechasRequest objReq)
         {
+            DateOnly dtFechaInicio, dtFechaFin;
             try
             {
-                List<LiquidacionResultado> lstTotalResultados = await _objCostoMateriaPrima.ObtenerReporteMateriaPrimaValorizada(dtFechaInicio, dtFechaFin);
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+
+                var objLibro = await _objOperacionComercial.ConsultarCostoVentaUniLibro(dtFechaInicio, dtFechaFin);
                 List<bool> lstBool = new List<bool> { true };
-                var dtResult = new DataTablesResultDto
-                {
-                    Table = lstTotalResultados.AListaDeDiccionarios()
-                };
+                var dtResult = DataTablesResultDto.FromList(objLibro.lstCostoGlobal, 0);
                 return Ok(new ApiResponse<DataTablesResultDto>
                 {
                     blStatus = true,
@@ -101,7 +114,7 @@ namespace CostManagement.API.Controllers
             }
         }
 
-        [HttpPost("materia-prima")]
+        [HttpPost("materia-prima/grabar")]
         public async Task<IActionResult> PostMateriaPrimaReportAsync([FromBody] RequestMatPrimDto objRequest)
         {
             try
@@ -126,7 +139,7 @@ namespace CostManagement.API.Controllers
             }
         }
 
-        [HttpPost("material-empaque")]
+        [HttpPost("material-empaque/grabar")]
         public async Task<IActionResult> ActualizarCostoMaterialEmpaque(DateOnly dtFechaInicio, DateOnly dtFechaFin)
         {
 
@@ -154,12 +167,19 @@ namespace CostManagement.API.Controllers
         }
 
 
-        [HttpGet("material-empaque")]
-        public async Task<IActionResult> ObtenerCostoMaterialEmpaque(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        [HttpPost("material-empaque")]
+        public async Task<IActionResult> ObtenerCostoMaterialEmpaque([FromBody] RangoFechasRequest objReq)
         {
-
+            DateOnly dtFechaInicio, dtFechaFin;
             try
             {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+
                 var lstTotalResultados = await _objCostoMateriaPrima.ObtenerReporteMaterialEmpaqueValorizado(dtFechaInicio, dtFechaFin);
 
                 var dtResult = DataTablesResultDto.FromList(lstTotalResultados, 0);
@@ -183,18 +203,73 @@ namespace CostManagement.API.Controllers
         }
 
 
-        [HttpGet("materia-prima-repro")]
-        public async Task<IActionResult> ObtenerCostoMateriaPrimaRepro(DateOnly dtFechaInicio, DateOnly dtFechaFin)
-        {
 
+        [HttpPost("material-empaque-auditoria")]
+        public async Task<IActionResult> AuditarCostoMaterialEmpaque([FromBody] MaterialEmpaqueAuditoriaRequest objReq)
+        {
+            DateOnly dtFechaInicio, dtFechaFin;
             try
             {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+                string? strProducto = objReq.strProducto;
+                int? intLote = objReq.intLote;
+                bool blSoloErrores = objReq.blSoloErrores;
+
+                var resultado = await _objCostoMateriaPrima.AuditarMaterialEmpaque(
+                    dtFechaInicio,
+                    dtFechaFin,
+                    strProducto,
+                    intLote,
+                    blSoloErrores);
+
+                var dtResult = new DataTablesResultDto
+                {
+                    Table = resultado.lstResumen.AListaDeDiccionarios(),
+                    Table1 = resultado.lstDetalle.AListaDeDiccionarios()
+                };
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Auditoría de material de empaque ejecutada correctamente",
+                    objData = dtResult
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error en auditoría de material de empaque: " + ex.Message,
+                    objData = ""
+                });
+            }
+        }
+
+        [HttpPost("materia-prima-repro")]
+        public async Task<IActionResult> ObtenerCostoMateriaPrimaRepro([FromBody] RangoFechasRequest objReq)
+        {
+            DateOnly dtFechaInicio, dtFechaFin;
+            try
+            {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+
                 var lstTotalResultados = await _objCostoMateriaPrima.ObtenerReporteMateriaPrimaReproValorizada(dtFechaInicio, dtFechaFin);
                 CostosUnitarios objCostUni = await _objCostoMateriaPrima.ObtenerValProcesoRpc(dtFechaInicio);
                 List<bool> lstBool = new List<bool> { true };
                 var dtResult = new DataTablesResultDto
                 {
-                    Table = lstTotalResultados.AListaDeDiccionarios(),
+                    Table = lstTotalResultados.AReporteMateriaPrima(),
                     Table3 = DataTablesResultDto.FromObject(objCostUni)
                 };
                 return Ok(new ApiResponse<DataTablesResultDto>
@@ -218,7 +293,7 @@ namespace CostManagement.API.Controllers
 
 
 
-        [HttpPost("materia-prima-repro")]
+        [HttpPost("materia-prima-repro/grabar")]
         public async Task<IActionResult> CrearCostoMatReproAsync([FromBody] RequestMatPrimDto objRequest)
         {
             try
@@ -244,12 +319,19 @@ namespace CostManagement.API.Controllers
         }
 
 
-        [HttpGet("materia-prima-sal")]
-        public async Task<IActionResult> ObtenerInventarioValorizado(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        [HttpPost("materia-prima-sal")]
+        public async Task<IActionResult> ObtenerInventarioValorizado([FromBody] RangoFechasRequest objReq)
         {
-
+            DateOnly dtFechaInicio, dtFechaFin;
             try
             {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+
                 var lstTotalResultados = 
                 //await _objCostoMateriaPrima.ObtenerDiarioCostoAsync(dtFechaInicio, dtFechaFin);
                 await _objCostoMateriaPrima.ObtenerInventarioValorizado(dtFechaInicio, dtFechaFin);
@@ -339,12 +421,57 @@ namespace CostManagement.API.Controllers
 
 
 
-        [HttpGet("diario-mov")]
-        public async Task<IActionResult> ObtenerDiarioMovimiento(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        [HttpPost("diario-mov")]
+        public async Task<IActionResult> ObtenerDiarioMovimiento([FromBody] RangoFechasRequest objReq)
         {
-
+            DateOnly dtFechaInicio, dtFechaFin;
             try
             {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+
+
+                List<DiarioCosto> lstResult = await _objOperacionComercial.ConsultarDiarioMovimientoHojas(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+
+                return Ok(new ApiResponse<DataTablesResultDto>
+                {
+                    blStatus = true,
+                    strMensaje = "Consulta ejecutada correctamente",
+                    objData = dtResult
+                });
+
+            }
+            catch (Exception objException)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error al obtener la informacion: " + objException.Message,
+                    objData = ""
+                });
+            }
+        }
+
+
+
+        [HttpPost("saldo-inv")]
+        public async Task<IActionResult> ObtenerSaldoInventario([FromBody] RangoFechasRequest objReq)
+        {
+            DateOnly dtFechaInicio, dtFechaFin;
+            try
+            {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+
 
                 List<DiarioCosto> lstResult = await _objCostoMateriaPrima.ObtenerDiarioCostoAsync(dtFechaInicio, dtFechaFin);
                 var dtResult = DataTablesResultDto.FromList(lstResult, 0);
@@ -369,43 +496,19 @@ namespace CostManagement.API.Controllers
         }
 
 
-
-        [HttpGet("saldo-inv")]
-        public async Task<IActionResult> ObtenerSaldoInventario(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        [HttpPost("diario-costo-venta")]
+        public async Task<IActionResult> ObtenerVentasVsFacturas([FromBody] RangoFechasRequest objReq)
         {
-
+            DateOnly dtFechaInicio, dtFechaFin;
             try
             {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
 
-                List<DiarioCosto> lstResult = await _objCostoMateriaPrima.ObtenerDiarioCostoAsync(dtFechaInicio, dtFechaFin);
-                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
 
-                return Ok(new ApiResponse<DataTablesResultDto>
-                {
-                    blStatus = true,
-                    strMensaje = "Consulta ejecutada correctamente",
-                    objData = dtResult
-                });
-
-            }
-            catch (Exception objException)
-            {
-                return BadRequest(new ApiResponse<string>
-                {
-                    blStatus = false,
-                    strMensaje = "Error al obtener la informacion: " + objException.Message,
-                    objData = ""
-                });
-            }
-        }
-
-
-        [HttpGet("diario-costo-venta")]
-        public async Task<IActionResult> ObtenerVentasVsFacturas(DateOnly dtFechaInicio, DateOnly dtFechaFin)
-        {
-
-            try
-            {
 
                 var lstResult = 
                     await _objOperacionComercial.ObtenerReporteVentasVsFacturas(dtFechaInicio, dtFechaFin);
@@ -431,16 +534,23 @@ namespace CostManagement.API.Controllers
         }
 
 
-        [HttpGet("costo-venta-uni")]
-        public async Task<IActionResult> ObtenerCostoVentaUni(DateOnly dtFechaInicio, DateOnly dtFechaFin)
+        [HttpPost("costo-venta-uni")]
+        public async Task<IActionResult> ObtenerCostoVentaUni([FromBody] RangoFechasRequest objReq)
         {
-
+            DateOnly dtFechaInicio, dtFechaFin;
             try
             {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+
 
                 var lstResult =
-                    await _objOperacionComercial.ConsultarCostoVentaUni(dtFechaInicio, dtFechaFin);
-                var dtResult = DataTablesResultDto.FromList(lstResult, 0);
+                    await _objOperacionComercial.ConsultarCostoVentaUniDisponible(dtFechaInicio, dtFechaFin);
+                var dtResult = DataTablesResultDto.FromList(lstResult.lstDisponibleLote, 0);
 
                 return Ok(new ApiResponse<DataTablesResultDto>
                 {
@@ -461,6 +571,69 @@ namespace CostManagement.API.Controllers
             }
         }
 
+
+        /// <summary>
+        /// CodProd 6550 / Talla 26/30 en Costo de Venta Unitario. Candidato a
+        /// eliminar una vez cerrada la investigación.
+        /// </summary>
+        [HttpPost("diagnostico-disponible-lote")]
+        public async Task<IActionResult> DiagnosticoDisponibleLote([FromBody] DiagnosticoDisponibleLoteRequest objReq)
+        {
+            DateOnly dtFechaInicio, dtFechaFin;
+            try
+            {
+                var objError = ValidarRangoFechas(objReq);
+                if (objError != null)
+                    return objError;
+
+                dtFechaInicio = DateOnly.FromDateTime(objReq.dtFechaInicio);
+                dtFechaFin = DateOnly.FromDateTime(objReq.dtFechaFin);
+                int intLote = objReq.intLote;
+                int intCodProd = objReq.intCodProd;
+                string strTalla = objReq.strTalla;
+
+                object objResultado = await _objOperacionComercial.DiagnosticoDisponibleLote(
+                    dtFechaInicio, dtFechaFin, intLote, intCodProd, strTalla);
+
+                return Ok(new ApiResponse<object>
+                {
+                    blStatus = true,
+                    strMensaje = "Consulta ejecutada correctamente",
+                    objData = objResultado
+                });
+            }
+            catch (Exception objException)
+            {
+                return BadRequest(new ApiResponse<string>
+                {
+                    blStatus = false,
+                    strMensaje = "Error al obtener la informacion: " + objException.Message,
+                    objData = ""
+                });
+            }
+        }
+
+
+        private BadRequestObjectResult? ValidarRangoFechas(RangoFechasRequest? objReq)
+        {
+            string? strMensaje = objReq == null
+                ? "El request no puede ser nulo"
+                : objReq.dtFechaInicio == default || objReq.dtFechaFin == default
+                    ? "dtFechaInicio y dtFechaFin son requeridas y deben ser fechas válidas"
+                    : objReq.dtFechaInicio > objReq.dtFechaFin
+                        ? "dtFechaInicio no puede ser mayor que dtFechaFin"
+                        : null;
+
+            if (strMensaje == null)
+                return null;
+
+            return BadRequest(new ApiResponse<string>
+            {
+                blStatus = false,
+                strMensaje = strMensaje,
+                objData = ""
+            });
+        }
 
         [HttpPost("exportar-excel")]
         public async Task<IActionResult> ExportarLiquidacionesExcel([FromBody] DataGeneralRequest request)
@@ -485,8 +658,39 @@ namespace CostManagement.API.Controllers
                 if (request == null)
                     throw new Exception("El request no puede ser nulo");
 
-                fechaInicio = DateOnly.Parse(request.modelParam[1].value.ToString());
-                fechaFin = DateOnly.Parse(request.modelParam[2].value.ToString());
+                // Cambiar los índices según el orden real en que los envías desde Angular
+                int indexFin = -1; // Guardará la posición que nos corresponde buscar para fechaFin
+
+                // 1. Determinar fechaInicio y establecer qué índice buscar para fechaFin
+                if (request?.modelParam != null && request.modelParam.Count > 0 &&
+                    DateOnly.TryParse(request.modelParam[0]?.value?.ToString(), out DateOnly f0))
+                {
+                    fechaInicio = f0;
+                    indexFin = 1; // Si inicio estuvo en [0], la fecha fin debería ser [1]
+                }
+                else if (request?.modelParam != null && request.modelParam.Count > 1 &&
+                         DateOnly.TryParse(request.modelParam[1]?.value?.ToString(), out DateOnly f1))
+                {
+                    fechaInicio = f1;
+                    indexFin = 2; // Si inicio estuvo en [1], la fecha fin debería ser [2]
+                }
+                else
+                {
+                    fechaInicio = DateOnly.FromDateTime(DateTime.Today);
+                    indexFin = 1;
+                }
+
+                // 2. Asignar fechaFin usando el índice calculado
+                if (request?.modelParam != null && request.modelParam.Count > indexFin &&
+                    DateOnly.TryParse(request.modelParam[indexFin]?.value?.ToString(), out DateOnly ff))
+                {
+                    fechaFin = ff;
+                }
+                else
+                {
+                    // Si no encuentra la fecha fin en esa posición, usa fechaInicio como fallback
+                    fechaFin = fechaInicio;
+                }
                 // Obtén tus datos desde el servicio o repositorio
 
 
@@ -496,13 +700,12 @@ namespace CostManagement.API.Controllers
                         liquidaciones = await
                             _objCostoMateriaPrima.ObtenerLiquidacionValorizada(fechaInicio, fechaFin);
                         objCostUni = await _objCostoMateriaPrima.ObtenerValProcesoFrs(fechaInicio);
-                        dataTable = liquidaciones.ADataTable();
+                        dataTable = liquidaciones.ATablaReporteMateriaPrima();
                         break;
 
                     case "materia-prima-Liq":
-                        liquidaciones = await
-                            _objCostoMateriaPrima.ObtenerReporteMateriaPrimaValorizada(fechaInicio, fechaFin);
-                        dataTable = liquidaciones.ADataTable();
+                        var objLibroLiq = await _objOperacionComercial.ConsultarCostoVentaUniLibro(fechaInicio, fechaFin);
+                        dataTable = objLibroLiq.lstCostoGlobal.ADataTable();
                         break;
 
                     case "material-empaque":
@@ -515,12 +718,11 @@ namespace CostManagement.API.Controllers
                         materiaPrimaRepro = await
                             _objCostoMateriaPrima.ObtenerReporteMateriaPrimaReproValorizada(fechaInicio, fechaFin);
                         objCostUni = await _objCostoMateriaPrima.ObtenerValProcesoRpc(fechaInicio);
-                        dataTable = materiaPrimaRepro.ADataTable();
+                        dataTable = materiaPrimaRepro.ATablaReporteMateriaPrima();
                         break;
 
                     case "diario-mov":
-                        lstDiarioCost = await
-                            _objCostoMateriaPrima.ObtenerDiarioCostoAsync(fechaInicio, fechaFin);
+                        lstDiarioCost = await _objOperacionComercial.ConsultarDiarioMovimientoHojas(fechaInicio, fechaFin);
                         dataTable = lstDiarioCost.ADataTable();
                         break;
 
@@ -535,9 +737,71 @@ namespace CostManagement.API.Controllers
                         dataTable =  obj.ADataTable();
                         break;
 
+                    case "costo-productivo":
+                        {
+
+                            CostoProductivoResultadoDto resultado =
+                                await _objOperacionComercial.ObtenerCostoProductivo(
+                                    fechaInicio.Year,
+                                    fechaInicio.Month);
+
+                            List<CostoProductivoExcelDto> filas =
+                                resultado.lstCuentas
+                                    .Select(CostoProductivoExcelDto.Crear)
+                                    .ToList();
+
+                            if (filas.Count == 0)
+                            {
+                                throw new InvalidOperationException(
+                                    "No existen datos para exportar.");
+                            }
+
+                            dataTable = filas.ADataTable();
+                            request.columnas = CostoProductivoExcelDto.Columnas;
+
+                            break;
+                        }
+
+                    case "diarios-cierre":
+                        {
+                            DiariosCierreDto objCierre =
+                                await _objCostoMateriaPrima
+                                    .ConsultarDiariosCierre(
+                                        fechaInicio.Year,
+                                        fechaInicio.Month);
+
+                            if (objCierre == null)
+                            {
+                                throw new InvalidOperationException(
+                                    "No se obtuvo información de diarios para el período.");
+                            }
+
+                            excelBytes =
+                                await _excelService
+                                    .DataDiariosCierreExcel(
+                                        request,
+                                        objCierre);
+
+                            break;
+                        }
+
                     case "costo-venta-uni":
-                        var objCostVen = await _objOperacionComercial.ConsultarCostoVentaUni(fechaInicio, fechaFin);
-                        dataTable = objCostVen.ADataTable();
+                        var objLibroCostoVenta = await _objOperacionComercial.ConsultarCostoVentaUniLibro(fechaInicio, fechaFin);
+                        // cada hoja expone únicamente las columnas definidas en el diseño.
+                        var objTablaCostoDetallado = objLibroCostoVenta.lstCostoDetallado.ADataTable();
+                        objTablaCostoDetallado.Columns.Remove("Movimiento");
+                        var objTablaEgresosVenta = objLibroCostoVenta.lstEgresosVenta.ADataTable();
+                        objTablaEgresosVenta.Columns.Remove("Movimiento");
+                        var objTablaOtrosCamara = objLibroCostoVenta.lstOtrosEgresosCamara.ADataTable();
+                        objTablaOtrosCamara.Columns.Remove("Movimiento");
+                        excelBytes = await _excelService.DataGeneralExcelHojas(request, new List<(string, DataTable)>
+                        {
+                            ("Costo Detallado", objTablaCostoDetallado),
+                            ("Costo Global", objLibroCostoVenta.lstCostoGlobal.ADataTable()),
+                            ("Egresos Venta", objTablaEgresosVenta),
+                            ("Otros Egresos Camara", objTablaOtrosCamara),
+                            ("Inventario Final", objLibroCostoVenta.lstInventarioFinal.ADataTable())
+                        });
                         break;
 
                     default:

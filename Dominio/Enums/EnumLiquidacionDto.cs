@@ -2,6 +2,13 @@
 {
     public class EnumLiquidacionDto
     {
+        // Auto intenta el cierre completo; el cierre siempre usa TiempoReal.
+        public enum enmOrigenDatos
+        {
+            Auto,
+            TiempoReal
+        }
+
         public enum enmTipoMerge
         {
             Fresco = 1,

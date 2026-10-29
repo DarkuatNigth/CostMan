@@ -1,4 +1,4 @@
-using CostManagement.Aplicación.DTos;
+﻿using CostManagement.Aplicación.DTos;
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.EF_Core;
@@ -252,6 +252,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     from cab in filtered
                                     select new
                                     {
+                                        cab.CeId, // desempate estable de cabeceras para las colas.
                                         Lote = cab.CeRloNumero,
                                         CodProd = cab.CeProCodcor.Trim(),
                                         dtFechaLote = cab.CeFecha,
@@ -260,9 +261,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     }
                             );
 
-                        dictColasProd = LiquidacionResultado.GenerarDiccionarioProcMatEmp(lstResultado);
+                        dictColasProd = LiquidacionResultado.GenerarDiccionarioProcMatEmp(EntradaCosteo.OrdenarFresco(lstResultado));
 
                         dictCostMatEmp = costosCabecera
+                            .OrderBy(x => x.Lote).ThenBy(x => x.CodProd, StringComparer.Ordinal).ThenBy(x => x.CeId)
                             .GroupBy(x => new LoteRpcKeyLoteXProd(x.Lote, x.CodProd.ToString().Trim()))
                             .ToDictionary(g => g.Key, g => new Queue<decimal>(g.Select(c => c.CcCosto)));
 
@@ -333,6 +335,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     from cab in filtered
                                     select new
                                     {
+                                        cab.CeId, // desempate estable de cabeceras para las colas.
                                         Lote = cab.CeRloNumero,
                                         CodProd = cab.CeProCodcor.Trim(),
                                         dtFechaLote = cab.CeFecha,
@@ -342,10 +345,11 @@ namespace CostManagement.Infraestructura.Repository.Services
                             );
 
                         dictCostMatEmp = objCostCabecera
+                            .OrderBy(x => x.Lote).ThenBy(x => x.CodProd, StringComparer.Ordinal).ThenBy(x => x.CeId)
                             .GroupBy(x => new LoteRpcKeyLoteXProd(x.Lote, x.CodProd))
                             .ToDictionary(g => g.Key, g => new Queue<decimal>(g.Select(c => c.CcCosto)));
 
-                        dictColasProd = MatPrimaReproceso.GenerarDiccionarioProcMatEmp(lstMatPrimaReproSinCostMatProd);
+                        dictColasProd = MatPrimaReproceso.GenerarDiccionarioProcMatEmp(EntradaCosteo.OrdenarRepro(lstMatPrimaReproSinCostMatProd));
 
                         foreach (var entry in dictColasProd)
                         {

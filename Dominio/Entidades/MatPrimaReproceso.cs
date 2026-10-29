@@ -1,4 +1,7 @@
-﻿using Microsoft.Extensions.DependencyModel;
+﻿using CostManagement.Aplicación.DTos;
+using CostManagement.Infraestructura.EF_Core;
+using CostManagement.Dominio.Reglas;
+using Microsoft.Extensions.DependencyModel;
 using Newtonsoft.Json;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -41,6 +44,24 @@ namespace CostManagement.Dominio.Entidades
         [Column("Congelamiento Producto")]
         public string strCongeProduc { get; set; }
 
+        [Column("Tipo Pelado")]
+        public string? strTipoPelado { get; set; }
+
+        [Column("Maquina Pelado")]
+        public string? strMaquinaPelado { get; set; }
+
+        [Column("Bod Congela")]
+        public string strBodCongela { get; set; }
+
+        [Column("Tip Embala")]
+        public string strTipEmbala { get; set; }
+
+        [Column("lid_clasificadora")]
+        public string? strLidClasificadora { get; set; }
+
+        [Column("Clasificadora")]
+        public string? strClasificadora { get; set; }
+
         [Column("LoteOrigen")]
         public int intLoteOrigen { get; set; }
 
@@ -68,6 +89,37 @@ namespace CostManagement.Dominio.Entidades
         [Column("Trazabilidad")]
         public string strNivel { get; set; }
 
+        [NotMapped]
+        public string strOrigenCosto { get; set; } = "";
+
+        [NotMapped]
+        public bool blUsadoComoFuente { get; set; }
+
+        [NotMapped][JsonIgnore]
+        public decimal dcCostoPondHistorico { get; set; }
+        [NotMapped][JsonIgnore]
+        public int intNivelHistorico { get; set; }
+        [NotMapped][JsonIgnore]
+        public bool blCostoReferencial { get; set; }
+        [NotMapped][JsonIgnore]
+        public double dbLibrasConsumidas { get; set; }
+        [NotMapped][JsonIgnore]
+        public double dbLibrasDisponibles { get; set; }
+        [NotMapped][JsonIgnore]
+        public bool blBloqueadoHistorico { get; set; }
+
+        [NotMapped][JsonIgnore]
+        public double dbLibrasTomadas { get; set; }
+        private bool _blLoteUsable = true;
+        [NotMapped][JsonIgnore]
+        public bool blLoteUsable { get => _blLoteUsable && !blExcluidoCosteo && !blBloqueadoHistorico; set => _blLoteUsable = value; }
+
+        // Peso del histórico vigente: no es el peso del recibido que lo consulta.
+        private decimal _dcLibrasHistorico;
+        private bool _blHistoricoAbsorbido;
+        private EstadoHistorico _objEstadoHistorico;
+        private const double ToleranciaLibras = 0.0001;
+
         [Column("Proc Prod")]
         public string strProClas03 { get; set; }
 
@@ -77,9 +129,14 @@ namespace CostManagement.Dominio.Entidades
         [Column("Libras")]
         public double dbLibras { get; set; }
 
-        [JsonIgnore]
         [Column("Libras Pelado")]
         public decimal? dcLibrasPelado { get; set; }
+
+        [Column("EsDescongelado")]
+        public bool? blEsDescongelado { get; set; }
+
+        [Column("Libras Retractilado")]
+        public decimal? dcLibrasRetractilado { get; set; }
 
         [Column("Rendimiento %")]
         public double dbRendimiento { get; set; }
@@ -89,10 +146,6 @@ namespace CostManagement.Dominio.Entidades
 
         [Column("Certificado")]
         public string? strCertificado { get; set; }
-
-        //[JsonIgnore]
-        [Column("Libras Retractilado")]
-        public decimal? dcLibrasRetractilado { get; set; }
 
         [Column("Costo X Secuencial")]
         public decimal dbCostoXSecuencial { get; set; }
@@ -116,6 +169,17 @@ namespace CostManagement.Dominio.Entidades
         //[JsonIgnore]
         [Column("Proceso")]
         public decimal? dcTarifaProc { get; set; }
+
+        // montos calculados de procesos sin columna dedicada.
+        [NotMapped][JsonIgnore]
+        public Dictionary<string, decimal> ProcesosAdicionales { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        // [NotMapped][Column("Otros Procesos")]
+        [NotMapped][JsonIgnore]
+        public decimal? dcOtrosProcesos => ProcesosAdicionales.Count == 0 ? null : ProcesosAdicionales.Values.Sum();
+
+        // vista del catálogo preparada por la feature, solo para reportes MP.
+        [NotMapped][JsonIgnore]
+        public Dictionary<string, Dictionary<string, decimal>>? dicProcesosReporte { get; set; }
 
         //[NotMapped]
         //[JsonIgnore]
@@ -225,6 +289,9 @@ namespace CostManagement.Dominio.Entidades
         public decimal? dcCajas { get; set; }
 
         [JsonIgnore]
+        public decimal? dcDescongelado { get; set; }
+
+        [JsonIgnore]
         public decimal? dcDescabezado { get; set; }
 
         [JsonIgnore]
@@ -330,6 +397,14 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         public LoteRpcKeyReci objRpcValOrKey { get; set; }
 
+        [NotMapped]
+        [JsonIgnore]
+        public LoteFrsKey objFrskey { get; set; }
+
+        [NotMapped]
+        [JsonIgnore]
+        public InfoProd objInfoProd { get; set; }
+
         #region Constructor
         public MatPrimaReproceso() { }
 
@@ -341,9 +416,10 @@ namespace CostManagement.Dominio.Entidades
                 DateTime? lotFecha, string prodCod, string descriProduc, string talDescri,
                 double libras, string agrupacion, int codTal, string recTipo, string recNombre, bool pelado,
                 bool decorado, bool retractilado, string ProClas03, string Certificado, decimal? Premio,
-                decimal? RecPorHid, decimal? RecPorcSal, decimal? RtCodItem, decimal? lbsRetractilado,double? PesoPelado, string BodCod,
+                decimal? RecPorHid, decimal? RecPorcSal, decimal? RtCodItem, decimal? lbsRetractilado,double? PesoPelado, string TipoPelado, string MaquinaPelado,
+                string BodCod, string BodDescri,
                 string EmbCodigo, decimal MedCodigo, double CantCaja, bool? bodEsBrine, decimal? RtaCodigo, decimal? TidCodigo, bool esDescabezado, decimal? proCongela,
-                decimal? PorSal, decimal? PorHid
+                decimal? PorSal, decimal? PorHid, string LidClasificadora, string Clasificadora, string TipEmbala
             )
         {
             try
@@ -354,7 +430,7 @@ namespace CostManagement.Dominio.Entidades
                 strTipDescri = tipDescri.Trim();
                 strClaseProd = claseProd;
                 strLotTipo = lotTipo;
-                intCodCopacking = Convert.ToInt32(CodCopacking);
+                intCodCopacking = !String.IsNullOrWhiteSpace(CodCopacking) ? Convert.ToInt32(CodCopacking) : 0;
                 strTipoCopacking = tipoCopacking;
                 intLotNumero = (int)lotNumero;
                 intLoteUnificado = (int)loteUnificado;
@@ -378,7 +454,7 @@ namespace CostManagement.Dominio.Entidades
                 strRecNombre = recNombre;
                 blPelado = pelado;
                 blDecorado = decorado;
-                blRetractilado = retractilado;
+                blRetractilado = (int)RtaCodigo.Value > 2 && strLotTipo == "VA" ? true : false ;
                 strProClas03 = ProClas03;
                 strCertificado = Certificado;
                 InitializerCostPremio(Premio);
@@ -391,16 +467,22 @@ namespace CostManagement.Dominio.Entidades
                 dcCthHidlbs = RecPorHid;
                 intRtCodItem = RtCodItem.HasValue ? (int)RtCodItem.Value : null;
                 dcLibrasPelado = PesoPelado != null && pelado  ? (decimal)/*dbLibras*/PesoPelado : 0m;
-                dcLibrasRetractilado = lbsRetractilado != null && retractilado ? (decimal)lbsRetractilado/*lbsRetractilado.Value */: 0m;
+                dcLibrasRetractilado = 0m;
                 strBodCod = BodCod;
+                strBodCongela = BodDescri;
                 strEmbCodigo = EmbCodigo;
                 intMedCodigo = (int)MedCodigo;
                 dbMasters = CantCaja;
                 blBodEsBrine = bodEsBrine ?? false;
-                intRtaCodigo = RtaCodigo.HasValue ? (int)RtaCodigo.Value : null;
-                intTidCodigo = TidCodigo.HasValue ? (int)TidCodigo.Value : null;
+                intRtaCodigo = (int)RtaCodigo.Value;
+                intTidCodigo = (int)TidCodigo.Value;
                 blEsDescabezado = esDescabezado && lstTiplot.Contains(strTipCod) ? true : false;
                 intProCongela = proCongela.HasValue ? (int)proCongela.Value : 0;
+                strClasificadora = Clasificadora;
+                strLidClasificadora = LidClasificadora;
+                strTipoPelado = TipoPelado;
+                strMaquinaPelado = MaquinaPelado;
+                strTipEmbala = TipEmbala;
                 InitializerKeys();
             }
             catch (Exception ex)
@@ -419,39 +501,49 @@ namespace CostManagement.Dominio.Entidades
                 HashSet<LoteRpcKeyReci> hashLotePiso, string proClas03, string proClas05, string proClas01
             )
         {
-            strTipCod = tipCod.Trim();
-            strTipDescri = tipDescri.Trim();
-            strClaseProd = claseProd;
-            strLotTipo = lotTipo;
-            intCodCopacking = Convert.ToInt32(CodCopacking);
-            strTipoCopacking = tipoCopacking;
-            strProClas03 = proClas03;
-            strTipoProducto = proClas01 == "CC" && proClas05 == "EN" ? "ENTERO" :
-                    proClas01 == "SC" && proClas05 == "SH" ? "COLA" :
-                    proClas01 == "CC" && proClas05 == "VA" ? "ENTERO VALOR AGREGADO" :
-                    proClas01 == "SC" && proClas05 == "VA" ? "COLA VALOR AGREGADO" :
-                    "OTRO";
-            intLotNumero = (int)lotNumero;
-            intLoteUnificado = (int)loteUnificado;
-            strPlantaProceso = plantaProceso;
-            //strTipoProducto = tipoProducto;
-            strCongeProduc = congeProduc;
-            intLoteOrigen = (int)loteOrigen;
-            dtFechaLote = fechaLote.HasValue
-                            ? DateOnly.FromDateTime(fechaLote.Value)
-                            : null;
-            dcRecibido = recibido;
-            dcLotProces = (decimal)lotProces;
-            dtLotFecha = (DateTime)lotFecha;
-            intCodProd = Convert.ToInt32(prodCod);
-            strDescriProduc = descriProduc;
-            strTalDescri = talDescri;
-            dbLibras = libras;
-            strAgrupacion = agrupacion;
-            intCodTal = codTal;
-            blExcluidoCosteo = hashLotePiso?.Contains(
-                    new LoteRpcKeyReci((int)loteOrigen, Convert.ToInt32(prodCod), codTal)) ?? false;
-            InitializerKeys();
+            try
+            {
+                List<string> lottiposValidos = new List<string> { "R2", "R5", "R6" };
+                strTipCod = tipCod.Trim();
+                strTipDescri = tipDescri.Trim();
+                strClaseProd = claseProd;
+                strLotTipo = lotTipo;
+                intCodCopacking =  !String.IsNullOrWhiteSpace( CodCopacking) ?   Convert.ToInt32(CodCopacking): 0;
+                strTipoCopacking = tipoCopacking;
+                strProClas03 = proClas03;
+                strTipoProducto = proClas01 == "CC" && proClas05 == "EN" ? "ENTERO" :
+                        proClas01 == "SC" && proClas05 == "SH" ? "COLA" :
+                        proClas01 == "CC" && proClas05 == "VA" ? "ENTERO VALOR AGREGADO" :
+                        proClas01 == "SC" && proClas05 == "VA" ? "COLA VALOR AGREGADO" :
+                        "OTRO";
+                intLotNumero = (int)lotNumero;
+                intLoteUnificado = (int)loteUnificado;
+                strPlantaProceso = plantaProceso;
+                strCongeProduc = congeProduc;
+                intLoteOrigen = (int)loteOrigen;
+                dtFechaLote = fechaLote.HasValue
+                                ? DateOnly.FromDateTime(fechaLote.Value)
+                                : null;
+                dcRecibido = recibido;
+                dcLotProces = (decimal)lotProces;
+                dtLotFecha = (DateTime)lotFecha;
+                intCodProd = Convert.ToInt32(prodCod);
+                strDescriProduc = descriProduc;
+                strTalDescri = talDescri;
+                dbLibras = libras;
+                strAgrupacion = agrupacion;
+                intCodTal = codTal;
+                blExcluidoCosteo = hashLotePiso?.Contains(
+                        new LoteRpcKeyReci((int)loteOrigen, Convert.ToInt32(prodCod), codTal)) ?? false;
+                blEsDescongelado = (
+                    (lottiposValidos.Contains(strTipCod) && strLotTipo == "RE") ||
+                    strLotTipo == "VA") && strProClas03 == "PT";
+                InitializerKeys();
+            }
+            catch (Exception obj)
+            {
+                Console.WriteLine("", obj);
+            }
         }
         #endregion
 
@@ -598,6 +690,252 @@ namespace CostManagement.Dominio.Entidades
         #endregion
 
         #region Generacion Diccionarios y Listas
+        // REGLA: el PROCESADO consume por lote secuencial, proporcional a las libras
+        // de TODOS sus RECIBIDO; el disponible nunca es negativo (tolerancia 0,0001 lb).
+        public static void CalcularDisponiblePorLote(List<MatPrimaReproceso> lstRpc)
+        {
+            foreach (var item in lstRpc)
+            {
+                item.dbLibrasConsumidas = item.dbLibrasDisponibles = 0;
+                item.blBloqueadoHistorico = false;
+                item.dbLibrasTomadas = 0;
+                item.blLoteUsable = !item.blExcluidoCosteo && item.strAgrupacion != "1. RECIBIDO";
+                item._dcLibrasHistorico = 0m;
+                item._blHistoricoAbsorbido = false;
+                item._objEstadoHistorico = null;
+            }
+            foreach (var lote in lstRpc.GroupBy(x => x.intLotNumero))
+            {
+                var recibidos = lote.Where(x => x.strAgrupacion == "1. RECIBIDO" && x.dbLibras > 0).ToList();
+                double lbsRec = recibidos.Sum(x => x.dbLibras);
+                double lbsProc = lote.Where(x => x.strAgrupacion == "2. PROCESADO").Sum(x => Math.Max(0, x.dbLibras));
+                double proporcion = lbsRec > 0 ? Math.Min(1, lbsProc / lbsRec) : 0;
+                foreach (var rec in recibidos)
+                {
+                    rec.dbLibrasDisponibles = Math.Max(0, rec.dbLibras * (1 - proporcion));
+                    if (rec.dbLibrasDisponibles <= ToleranciaLibras) rec.dbLibrasDisponibles = 0;
+                    rec.dbLibrasConsumidas = rec.dbLibras - rec.dbLibrasDisponibles;
+                    rec.blLoteUsable = !rec.blExcluidoCosteo && rec.dbLibrasDisponibles > ToleranciaLibras;
+                }
+                if (recibidos.Sum(x => x.dbLibrasDisponibles) <= ToleranciaLibras)
+                    foreach (var proc in lote.Where(x => x.strAgrupacion == "2. PROCESADO"))
+                    { proc.blLoteUsable = false; if (proc.dbCostoXSecuencial > 0) proc.blBloqueadoHistorico = true; }
+            }
+        }
+
+        internal sealed class EstadoHistorico
+        {
+            internal decimal Costo, Libras;
+            internal bool Usado;
+            internal MatPrimaReproceso FilaReporte;
+        }
+
+        // Índices estructurales por pasada; costos y banderas se leen de las filas vivas.
+        public sealed class IndiceDisponibleHistorico
+        {
+            internal readonly ILookup<(int, int), MatPrimaReproceso> PorProductoTalla;
+            internal readonly ILookup<(int, int, int), MatPrimaReproceso> PorOrigen;
+            internal readonly ILookup<int, MatPrimaReproceso> PorLote;
+            internal readonly Dictionary<int, double> DisponiblePorLote;
+            internal readonly Dictionary<(int, int, int), EstadoHistorico> Historicos = new();
+            internal Action Confirmacion;
+            internal MatPrimaReproceso Destino;
+            public IndiceDisponibleHistorico(List<MatPrimaReproceso> filas)
+            {
+                PorProductoTalla = filas.ToLookup(x => (x.intCodProd, x.intCodTal));
+                PorOrigen = filas.ToLookup(x => (x.intLoteUnificado, x.intCodProd, x.intCodTal));
+                PorLote = filas.ToLookup(x => x.intLotNumero);
+                DisponiblePorLote = PorLote.ToDictionary(g => g.Key,
+                    g => g.Where(x => x.strAgrupacion == "1. RECIBIDO").Sum(x => x.dbLibrasDisponibles));
+                foreach (var fila in filas.Where(x => x._objEstadoHistorico != null))
+                {
+                    var clave = (fila.intCodProd, fila.intCodTal, fila.intNivelHistorico);
+                    if (!Historicos.TryGetValue(clave, out var previo) || previo.Usado)
+                        Historicos[clave] = fila._objEstadoHistorico;
+                }
+            }
+            // El motor llama una vez al iniciar un barrido con candidatos.
+            public void BloquearProcesadosAgotados()
+            {
+                foreach (var lote in PorLote) BloquearProcesadosAgotados(lote.Key);
+            }
+            internal void BloquearProcesadosAgotados(int lote)
+            {
+                if (DisponiblePorLote.GetValueOrDefault(lote) > ToleranciaLibras) return;
+                foreach (var proc in PorLote[lote].Where(x => x.strAgrupacion == "2. PROCESADO"))
+                { proc.blLoteUsable = false; if (proc.dbCostoXSecuencial > 0) proc.blBloqueadoHistorico = true; }
+            }
+            public void Confirmar(MatPrimaReproceso rec)
+            {
+                if (ReferenceEquals(Destino, rec) && !rec.blExcluidoCosteo && rec.dbCostoXSecuencial > 0)
+                    Confirmacion?.Invoke();
+                Confirmacion = null;
+                Destino = null;
+            }
+        }
+
+        // Consultar no cambia las filas; el motor confirma después de asignar precio positivo.
+        public static decimal ObtenerCostoDisponibleLote(MatPrimaReproceso rec, List<MatPrimaReproceso> lstRpc, IndiceDisponibleHistorico indice = null)
+        {
+            if (rec.blExcluidoCosteo || rec.dbCostoXSecuencial > 0 || rec.dbLibras <= ToleranciaLibras) return 0m;
+            indice ??= new IndiceDisponibleHistorico(lstRpc);
+            indice.Confirmacion = null;
+            indice.Destino = rec;
+            var fuentes = indice.PorOrigen[(rec.intLoteOrigen, rec.intCodProd, rec.intCodTal)]
+                .Where(x => !ReferenceEquals(x, rec) && x.strAgrupacion == "1. RECIBIDO" && x.blLoteUsable
+                    && !x.blBloqueadoHistorico && !x.blExcluidoCosteo && !x.blCostoReferencial
+                    && x.dbCostoXSecuencial > 0 && x.dbLibras > 0 && x.dbLibrasDisponibles > ToleranciaLibras).ToList();
+            double disponible = fuentes.Sum(x => x.dbLibrasDisponibles);
+            if (disponible <= ToleranciaLibras) return 0m;
+            decimal costo = Math.Round(fuentes.Sum(x => x.dbCostoTotal) / (decimal)fuentes.Sum(x => x.dbLibras), 4);
+            if (costo <= 0m) return 0m;
+            indice.Confirmacion = () =>
+            {
+                double tomadas = Math.Min(disponible, rec.dbLibras), pendientes = tomadas;
+                foreach (var fuente in fuentes)
+                {
+                    double consumo = Math.Min(fuente.dbLibrasDisponibles, pendientes);
+                    if (consumo <= 0) continue;
+                    fuente.dbLibrasDisponibles = Math.Max(0, fuente.dbLibrasDisponibles - consumo);
+                    fuente.dbLibrasConsumidas += consumo;
+                    pendientes = Math.Max(0, pendientes - consumo);
+                    fuente.blUsadoComoFuente = true;
+                    indice.DisponiblePorLote[fuente.intLotNumero] -= consumo;
+                    if (fuente.dbLibrasDisponibles <= ToleranciaLibras)
+                    { fuente.blBloqueadoHistorico = true; fuente.blLoteUsable = false; }
+                }
+                foreach (int lote in fuentes.Select(x => x.intLotNumero).Distinct()) indice.BloquearProcesadosAgotados(lote);
+                rec.dbLibrasTomadas = tomadas;
+                rec.blCostoReferencial = false;
+                rec.strOrigenCosto = "DISP";
+            };
+            return costo;
+        }
+
+        // Histórico por producto+talla+nivel; estado independiente de las libras del destino.
+        public static decimal ObtenerCostoHistorico(MatPrimaReproceso rec, List<MatPrimaReproceso> lstRpc,
+            IReadOnlyDictionary<string, int> mapaNiveles, IndiceDisponibleHistorico indice = null)
+        {
+            if (rec.blExcluidoCosteo || !ConfigRespaldoRpc.HistoricoPonderado || rec.dbCostoXSecuencial > 0 || rec.dbLibras <= ToleranciaLibras) return 0m;
+            indice ??= new IndiceDisponibleHistorico(lstRpc);
+            indice.Confirmacion = null;
+            indice.Destino = rec;
+            int nivel = NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles);
+            EstadoHistorico anterior = null;
+            for (int n = nivel; n >= 1; n--)
+                if (indice.Historicos.TryGetValue((rec.intCodProd, rec.intCodTal, n), out var historico)
+                    && !historico.Usado && !historico.FilaReporte.blExcluidoCosteo)
+                { anterior = historico; break; }
+            decimal libras = anterior?.Libras ?? 0m;
+            decimal dolares = libras * (anterior?.Costo ?? 0m);
+            var absorbidas = new List<MatPrimaReproceso>();
+            var fuentes = indice.PorProductoTalla[(rec.intCodProd, rec.intCodTal)]
+                .Where(x => !ReferenceEquals(x, rec) && x.strAgrupacion == "1. RECIBIDO" && x.blLoteUsable
+                    && !x.blBloqueadoHistorico && !x.blExcluidoCosteo && !x.blCostoReferencial
+                    && x.dbCostoXSecuencial > 0 && x.dbLibras > 0 && x.dbLibrasDisponibles > ToleranciaLibras
+                    && (x.strNivel == "NV1" || (nivel > 2 && NivelCosteo.ObtenerNivel(x.strTipCod, mapaNiveles) < nivel)))
+                .GroupBy(x => x.intLoteUnificado);
+            foreach (var grupo in fuentes)
+            {
+                double disponible = grupo.Sum(x => x.dbLibrasDisponibles);
+                decimal costo = grupo.Sum(x => x.dbCostoTotal) / (decimal)grupo.Sum(x => x.dbLibras);
+                if (costo <= 0m) continue;
+                libras += (decimal)disponible;
+                dolares += costo * (decimal)disponible;
+                absorbidas.AddRange(grupo);
+            }
+            if (libras <= (decimal)ToleranciaLibras) return 0m;
+            decimal ponderado = Math.Round(dolares / libras, 4);
+            if (ponderado <= 0m) return 0m;
+            indice.Confirmacion = () =>
+            {
+                rec.dcCostoPondHistorico = ponderado;
+                rec.intNivelHistorico = nivel;
+                rec._dcLibrasHistorico = libras;
+                rec._blHistoricoAbsorbido = false;
+                rec.blCostoReferencial = true;
+                rec.strOrigenCosto = "HIST";
+                foreach (var fuente in absorbidas)
+                { fuente.blBloqueadoHistorico = true; fuente.blLoteUsable = false; fuente.blUsadoComoFuente = true; }
+                if (anterior != null)
+                {
+                    anterior.Usado = true;
+                    anterior.FilaReporte._blHistoricoAbsorbido = true;
+                    anterior.FilaReporte.blBloqueadoHistorico = true;
+                    anterior.FilaReporte.blLoteUsable = false;
+                }
+                rec._objEstadoHistorico = new EstadoHistorico { Costo = ponderado, Libras = libras, FilaReporte = rec };
+                indice.Historicos[(rec.intCodProd, rec.intCodTal, nivel)] = rec._objEstadoHistorico;
+            };
+            return ponderado;
+        }
+
+        // REGLA: conservar la firma común y asignar con el motor existente, sin alterar signos.
+        public static void RetrocostearEspeciales(List<MatPrimaReproceso> lstRpc, IReadOnlyDictionary<string, int> mapaNiveles)
+        {
+            var motor = new MotorAsignacionPrecios(Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            RetrocostearEspeciales(lstRpc, mapaNiveles, (rec, costo) => motor.AsignarPrecio(rec, costo, null));
+        }
+
+        private static string NormalizarClaseRetro(string clase) => clase?.Trim().ToUpperInvariant() switch
+        { "A" or "A+" => "A", "B" or "N" => "B", _ => null };
+        private static bool EsTipoExcluidoRetro(string tipo) => tipo?.Trim().ToUpperInvariant() is "R7";
+
+        // REGLA ANTERIOR: UNI S/TALLA sin costo toman Σ MP / Σ libras de PROCESADO costeados por producto+clase A/B.
+        // REGLA: RECIBIDO UNI/CDI sin costo, de cualquier talla, toman Σ dbCostoTotal / Σ libras de RECIBIDO
+        // costeados no RETRO por código+clase normalizada A/B (strClaseProd = ProClas02), sin considerar talla; R7 queda fuera.
+        public static void RetrocostearEspeciales(List<MatPrimaReproceso> lstRpc, IReadOnlyDictionary<string, int> mapaNiveles, Action<MatPrimaReproceso, decimal> asignarPrecio)
+        {
+            if (!ConfigRespaldoRpc.RetrocosteoEspeciales) return;
+            var costos = lstRpc.Where(x => x.strAgrupacion == "1. RECIBIDO" && x.dbCostoXSecuencial > 0 && x.dbLibras > 0
+                && x.dbCostoTotal > 0 && NormalizarClaseRetro(x.strClaseProd) != null
+                && !x.blExcluidoCosteo && !string.Equals(x.strOrigenCosto?.Trim(), "RETRO", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(x => (x.intCodProd, strClase: NormalizarClaseRetro(x.strClaseProd)))
+                .ToDictionary(g => g.Key, g => Math.Round(g.Sum(x => x.dbCostoTotal) / (decimal)g.Sum(x => x.dbLibras), 4));
+            foreach (var rec in lstRpc.Where(x => x.strAgrupacion == "1. RECIBIDO" && x.dbCostoXSecuencial <= 0
+                && !x.blExcluidoCosteo && !EsTipoExcluidoRetro(x.strTipCod)
+                && (x.strTipCod?.Trim().ToUpperInvariant() is "UNI" or "CDI")))
+                if (costos.TryGetValue((rec.intCodProd, NormalizarClaseRetro(rec.strClaseProd) ?? ""), out decimal costo) && costo > 0m)
+                {
+                    asignarPrecio(rec, costo);
+                    if (rec.dbCostoXSecuencial <= 0) continue;
+                    rec.strOrigenCosto = "RETRO";
+                    rec.blCostoReferencial = true;
+                }
+        }
+
+        // REGLA: respaldo por prod+talla = Σ dbCostoTotal / Σ dbLibras, redondeado a 4.
+        // Actual conserva RECIBIDO global; N1 toma RECIBIDO costeados solo del nivel N-1.
+        // Para destino NV2, N-1 corresponde a strNivel == "NV1"; sin muestra no hay respaldo global.
+        // N1Excluyente toma PROCESADO costeados N-1 no usados como fuente (blUsadoComoFuente).
+        // Esta bandera se marca al trasladar el costo y depende del orden topológico.
+        // Se conservan los filtros positivos: dbCostoXSecuencial > 0 y dbLibras > 0.
+        public static Dictionary<LoteRpcKeyXProdTal, decimal> GenerarPromedioRespaldo(IEnumerable<MatPrimaReproceso> lstUniverso, IReadOnlyDictionary<string, int> mapaNiveles, int intNivelDestino, ModoRespaldoRpc modo)
+        {
+            if (modo == ModoRespaldoRpc.N1 || modo == ModoRespaldoRpc.N1Excluyente)
+            {
+                var lstNivelAnterior = lstUniverso.Where(x => intNivelDestino == 2 ? x.strNivel == "NV1" : NivelCosteo.ObtenerNivel(x.strTipCod, mapaNiveles) == intNivelDestino - 1);
+                if (modo == ModoRespaldoRpc.N1Excluyente)
+                    return GenerarPromedioPonderadoProc(lstNivelAnterior.Where(x => !x.blUsadoComoFuente).ToList());
+                return GenerarPromedioRespaldo(lstNivelAnterior, mapaNiveles, intNivelDestino, ModoRespaldoRpc.Actual);
+            }
+
+            // Actual: lógica vigente de MotorProrrateo, sin cambiar filtros, sumas ni redondeo.
+            return lstUniverso
+                .Where(x => x.strAgrupacion == "1. RECIBIDO"
+                         && x.dbCostoXSecuencial > 0
+                         && x.dbLibras > 0)
+                .GroupBy(x => new LoteRpcKeyXProdTal(x.intCodProd, x.intCodTal))
+                .ToDictionary(
+                    g => g.Key,
+                    g =>
+                    {
+                        decimal totLbs = (decimal)g.Sum(x => x.dbLibras);
+                        decimal totDol = g.Sum(x => x.dbCostoTotal);
+                        return totLbs > 0 ? Math.Round(totDol / totLbs, 4) : 0m;
+                    });
+        }
+
         public static Dictionary<LoteRpcKeyXProdTal, decimal> GenerarPromedioPonderadoGlobal(
     List<MatPrimaReproceso> lstMatPrimaRpc)
         {
@@ -676,17 +1014,13 @@ List<MatPrimaReproceso> lstMatPrimaRpc)
 
 
 
-        public static Dictionary<LoteRpcKeyReci, decimal> GenerarDicProcGlobal(
-List<MatPrimaReproceso> lstMatPrimaRpc)
+        public static Dictionary<LoteRpcKeyReci, decimal> GenerarDicProcGlobal(List<MatPrimaReproceso> lstMatPrimaRpc, ILogger? objLogger = null)
         {
-            return lstMatPrimaRpc
-                .Where(x => x.strAgrupacion == "2. PROCESADO"
-                         && x.dbCostoXSecuencial > 0
-                         && x.dbLibras > 0)
-                .GroupBy(x => x.objRpcValOrKey)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.First().dcCostoTotXLibra ?? 0m);
+            var lstGrupos = lstMatPrimaRpc.Where(x => x.strAgrupacion == "2. PROCESADO" && x.dbCostoXSecuencial > 0 && x.dbLibras > 0)
+                .GroupBy(x => x.objRpcValOrKey).ToList();
+            // DiagnosticoPrecision.Diccionario(objLogger, "DiccionarioPROC", lstGrupos.Count,
+                // lstGrupos.Count(g => DiagnosticoPrecision.EsUnitarioDosDecimales(g.First().dcCostoTotXLibra ?? 0m)));
+            return lstGrupos.ToDictionary(g => g.Key, g => Math.Round(g.Sum(x => x.dcTotalDolSum) / g.Sum(x => (decimal)x.dbLibras), 4));
         }
 
         public static Dictionary<LoteRpcKeyReci, decimal> GenerarPromedioPonderadoXLote(
@@ -706,6 +1040,15 @@ List<MatPrimaReproceso> lstMatPrimaRpc)
                         return totLbs > 0 ? Math.Round(totDol / totLbs, 4) : 0m;
                     });
         }
+        /// <summary>
+        /// Costo completo de una fila PROCESADO: materia prima + proceso + material
+        /// empaque + tarifario adicional. Única fórmula — la usan tanto
+        /// RendimientoReproPlanRecibProc (recalculo final) como TransferirPrecioFuente
+        /// (para que el destino herede el costo completo del origen, no solo materia prima).
+        /// </summary>
+        public static decimal CalcularCostoTotalDolSum(MatPrimaReproceso item) =>
+            (item.dcCostTotalProc ?? 0m) + (item.dcCostoTotalMatEmp ?? 0m) + item.dbCostoTotal + (item.dcTarifaProc ?? 0m) + (item.dcCertificado ?? 0m);
+
         public static Dictionary<LoteRpcValKey, decimal> GenerarCostoReciX(
     List<MatPrimaReproceso> lstMatPrimaRpc, LoteRpcKeyXSec objLoteFuente, LoteRpcKeyXSec objLoteDestino)
         {
@@ -718,7 +1061,8 @@ List<MatPrimaReproceso> lstMatPrimaRpc)
                 .GroupBy(x => x.objProdTalKey)   // LoteRpcKeyXProdTal(intProdCod, intCodTal)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.First().dbCostoXSecuencial); // ← ver pregunta 2 abajo
+                    // Anterior: g => g.First().dbCostoXSecuencial); se usa el total completo conocido de PROCESADO.
+                    g => g.Sum(x => CalcularCostoTotalDolSum(x)) / g.Sum(x => (decimal)x.dbLibras));
 
             // 2. RECIBIDO del destino: hereda el costo del fuente por (producto, talla)
             return lstMatPrimaRpc
@@ -854,6 +1198,8 @@ List<MatPrimaReproceso> lstMatPrimaRpc)
             this.objLoteProdReciKey = new LoteRpcKeyLoteXProd(this.intLotNumero, this.intCodProd.ToString().Trim());
             if (this.strAgrupacion == "1. RECIBIDO")
                 this.objLoteProdTalReciKey = new LoteRpcKeyReci((int)intLoteOrigen, this.intCodProd, this.intCodTal);
+            if (this.strAgrupacion == "2. PROCESADO")
+                this.objFrskey = new LoteFrsKey((int)intLoteUnificado, this.intCodProd, this.intCodTal);
             this.objRpcValOrKey = new LoteRpcKeyReci(this.intLoteUnificado, this.intCodProd, this.intCodTal);
         }
         #endregion

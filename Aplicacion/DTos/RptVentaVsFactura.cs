@@ -84,13 +84,18 @@ namespace CostManagementService.Aplicacion.DTos
         [Column("GASTOS ADMINISTRATIVOS")]
         public decimal dcGastosAdministrativos { get; set; }
 
-        [JsonProperty("GASTOS COMERCIALIZACION")]
-        [Column("GASTOS COMERCIALIZACION")]
+        // Antes: "GASTOS COMERCIALIZACION". Este pool corresponde a gastos financieros (cuentas FIN); solo cambia el nombre de la columna.
+        [JsonProperty("GASTOS FINANCIEROS")]
+        [Column("GASTOS FINANCIEROS")]
         public decimal dcGastosComercializacion { get; set; }
 
         [JsonProperty("GASTOS EXPORTACION")]
         [Column("GASTOS EXPORTACION")]
         public decimal dcGastosExportacion { get; set; }
+
+        [JsonProperty("GASTOS OTROS")]
+        [Column("GASTOS OTROS")]
+        public decimal dcGastosOtros { get; set; }
 
         [JsonProperty("Margen total")]
         [Column("Margen total")]
@@ -110,6 +115,27 @@ namespace CostManagementService.Aplicacion.DTos
 
 
 
+
+        public RptVentaVsFactura(MuestrasObsequiosDto objMovimiento)
+        {
+            // La consulta devuelve EOB para obsequios; los demas movimientos son tcd_muestra = 'S'.
+            bool blObsequio = string.Equals(objMovimiento.TrcTipo?.Trim(), "EOB", StringComparison.OrdinalIgnoreCase)
+                || (objMovimiento.TrsDescri?.Contains("OBSEQUI", StringComparison.OrdinalIgnoreCase) ?? false);
+            strTipo = blObsequio ? "OBSEQUIO" : "MUESTRA";
+            intTranCam = checked((int)objMovimiento.TrcNumsec);
+            dtFecha = DateOnly.FromDateTime(objMovimiento.TrcFecha);
+            intCodProd = int.TryParse(objMovimiento.ProCodcor, out int intProducto) ? intProducto : 0;
+            intTalla = checked((int)objMovimiento.TalCodigo);
+            strDescProducto = objMovimiento.ProDesesp ?? string.Empty;
+            strTalla = objMovimiento.TalDescri ?? string.Empty;
+            strClte = objMovimiento.CliDescripcion ?? string.Empty;
+            strFact = objMovimiento.EmbFactura?.Trim() ?? string.Empty;
+            strPais = string.Empty;
+            dcLibras = (decimal)(objMovimiento.Libras ?? 0d);
+            dcFob = 0m;
+            dcPrcXLb = 0m;
+            objDocFactRef = new NumDocXFactRef(intTranCam, strFact);
+        }
 
         public RptVentaVsFactura(RepFactPesoRealResult objPesosReales)
         {
@@ -169,11 +195,8 @@ namespace CostManagementService.Aplicacion.DTos
         {
             CalculoCostoTotal();
             CalculoMargen();
-            if (this.dcMargenTotal > 0)
-            {
-                CalculoMargenTotal();
-                CalculoMargenUnitario();
-            }
+            CalculoMargenTotal();
+            CalculoMargenUnitario();
         }
         private void CalculoFob(decimal dcPemPeso, decimal dcMasters, decimal dcPemPrecio)
         {
@@ -199,12 +222,12 @@ namespace CostManagementService.Aplicacion.DTos
 
         private void CalculoMargenTotal()
         {
-            this.dcMargenTotal = this.dcMargen1 - ( this.dcGastosAdministrativos + this.dcGastosComercializacion + this.dcGastosExportacion);
+            this.dcMargenTotal = this.dcMargen1 - ( this.dcGastosAdministrativos + this.dcGastosComercializacion + this.dcGastosExportacion + this.dcGastosOtros);
         }
 
         private void CalculoMargenUnitario()
         {
-            this.dcMargenUnitario = Math.Round(this.dcMargenTotal / this.dcLibras,2);
+            this.dcMargenUnitario = this.dcLibras == 0m ? 0m : Math.Round(this.dcMargenTotal / this.dcLibras,2);
         }
         #endregion
 
@@ -244,4 +267,65 @@ namespace CostManagementService.Aplicacion.DTos
 
         #endregion
     }
+
+
+    public class MuestrasObsequiosDto
+    {
+        [Column("trc_fecha")]
+        public DateTime TrcFecha { get; set; }
+
+        // ── TRANSACCIÓN ──
+        [Column("trc_tipo")]
+        public string TrcTipo { get; set; }
+
+        [Column("trs_descri")]
+        public string TrsDescri { get; set; }
+
+        [Column("tcd_lote")]
+        public long TcdLote { get; set; }               // bigint
+
+        [Column("trc_numsec")]
+        public decimal TrcNumsec { get; set; }          // numeric(18,0)
+
+        // ── CANTIDADES ──
+        [Column("libras")]
+        public double? Libras { get; set; }             // float; NULL si med_factor es NULL
+
+        // ── TALLA ──
+        [Column("tal_codigo")]
+        public decimal TalCodigo { get; set; }          // numeric(18,0), sin LTRIM/RTRIM
+
+        [Column("tal_descri")]
+        public string? TalDescri { get; set; }          // acepta NULL
+
+        // ── PRODUCTO ──
+        [Column("pro_codcor")]
+        public string ProCodcor { get; set; }
+
+        [Column("pro_desesp")]
+        public string ProDesesp { get; set; }
+
+        [Column("pro_clas01")]
+        public string ProClas01 { get; set; }
+
+        [Column("pro_clas02")]
+        public string ProClas02 { get; set; }
+
+        [Column("pro_clas03")]
+        public string ProClas03 { get; set; }
+
+        [Column("pro_clas04")]
+        public string ProClas04 { get; set; }
+
+        [Column("pro_clas05")]
+        public string ProClas05 { get; set; }
+
+        // ── FACTURA / CLIENTE (NULL en obsequios) ──
+        [Column("emb_factura")]
+        public string? EmbFactura { get; set; }
+
+        [Column("cli_descripcion")]
+        public string? CliDescripcion { get; set; }
+    }
+
 }

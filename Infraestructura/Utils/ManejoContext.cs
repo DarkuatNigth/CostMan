@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Data;
 using System.Data.Common;
@@ -60,14 +60,22 @@ namespace CostManagement.Infraestructura.Utils
             IDbContextTransaction? objTransaction = null;
             try
             {
+                using var objTiempoAbrir = MedicionTiempos.IniciarTramo("crear-contexto-abrir-transaccion");
                 objContext = await objFactory.CreateDbContextAsync();
                 objContext.Database.SetCommandTimeout(intTimeout);
                 objTransaction = nivelAislamiento.HasValue
                     ? await objContext.Database.BeginTransactionAsync(nivelAislamiento.Value)
                     : await objContext.Database.BeginTransactionAsync();
+                objTiempoAbrir.Dispose();
                 TResult objResultado = await funcOperacion(objContext);
+                #region Medicion transaccional
+                // solo registra cuando existe una medicion ambiente.
                 if (blRequiereCommit)
+                {
+                    // using var objTiempoCommit = MedicionTiempos.IniciarTramo("commit");
                     await objTransaction.CommitAsync();
+                }
+                #endregion
                 return objResultado;
             }
             catch
@@ -96,14 +104,22 @@ namespace CostManagement.Infraestructura.Utils
             IDbContextTransaction? objTransaction = null;
             try
             {
+                using var objTiempoAbrir = MedicionTiempos.IniciarTramo("crear-contexto-abrir-transaccion");
                 objContext = await objFactory.CreateDbContextAsync();
                 objContext.Database.SetCommandTimeout(intTimeout);
                 objTransaction = nivelAislamiento.HasValue
                     ? await objContext.Database.BeginTransactionAsync(nivelAislamiento.Value)
                     : await objContext.Database.BeginTransactionAsync();
+                objTiempoAbrir.Dispose();
                 await funcOperacion(objContext);
+                #region Medicion transaccional
+                // solo registra cuando existe una medicion ambiente.
                 if (blRequiereCommit)
+                {
+                    // using var objTiempoCommit = MedicionTiempos.IniciarTramo("commit");
                     await objTransaction.CommitAsync();
+                }
+                #endregion
             }
             catch
             {

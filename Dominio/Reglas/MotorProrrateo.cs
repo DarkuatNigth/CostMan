@@ -1,4 +1,5 @@
-﻿using CostManagement.Dominio.Entidades;
+﻿using CostManagement.Infraestructura.Utils;
+using CostManagement.Dominio.Entidades;
 
 namespace CostManagement.Dominio.Reglas
 {
@@ -14,6 +15,7 @@ namespace CostManagement.Dominio.Reglas
             List<LiquidacionResultado> lstFresco,
             List<PrecioFrsXMov> lstPrecioFrsUni,
             List<PrecioFrsXMov> lstPrecioFrsDir,
+            IReadOnlyDictionary<string, int> mapaNiveles,
             //string strVersionCtx,
             HashSet<LoteRpcKeyXSec> objLotesPermitidos = null,
             ILookup<LoteRpcKeyXSec, MatPrimaReproceso> objIndiceXLote = null)
@@ -38,39 +40,77 @@ namespace CostManagement.Dominio.Reglas
             //    NV1 y NV2 no necesitan este paso.
             int intNivelLote = lstItemsLote
                 .Where(x => x.strAgrupacion == "2. PROCESADO")
-                .Select(x => NivelCosteo.ObtenerNivel(x.strTipCod))
+                .Select(x => NivelCosteo.ObtenerNivel(x.strTipCod, mapaNiveles))
                 .DefaultIfEmpty(2).Max();
 
+            // using var objTiempoNivel = MedicionTiempos.IniciarTramo($"prorrateo-NV{intNivelLote}", () => lstItemsLote.Count);
             if (intNivelLote > 2)
             {
                 var lstFiltRecResid = lstItemsLote
                     .Where(x => x.strAgrupacion == "1. RECIBIDO"
                              && x.dbCostoXSecuencial == 0
-                             && !NivelCosteo.AplicaMetodoEspecial(x.strTipCod))
+                             && !x.blExcluidoCosteo
+                             && !NivelCosteo.AplicaMetodoEspecial(x.strTipCod, mapaNiveles))
                     .ToList();
                 if (lstFiltRecResid.Any())
                 {
-                    // Fuente CORRECTA: RECIBIDO ya costeados de TODO el universo
-                    var dictRef = lstTodos
-                        .Where(x => x.strAgrupacion == "1. RECIBIDO"
-                                 && x.dbCostoXSecuencial > 0
-                                 && x.dbLibras > 0)
-                        .GroupBy(x => new LoteRpcKeyXProdTal(x.intCodProd, x.intCodTal))
-                        .ToDictionary(
-                            g => g.Key,
-                            g =>
-                            {
-                                decimal totLbs = (decimal)g.Sum(x => x.dbLibras);
-                                decimal totDol = g.Sum(x => x.dbCostoTotal);
-                                return totLbs > 0 ? Math.Round(totDol / totLbs, 4) : 0m;
-                            });
+                    // medir reconstruccion global; no cachear costos que cambian por lote.
+                    // using var objTiempoResidual = MedicionTiempos.IniciarTramo("prorrateo-promedio-residual-global");
 
-                    foreach (var rec in lstFiltRecResid)
-                    {
-                        var key = new LoteRpcKeyXProdTal(rec.intCodProd, rec.intCodTal);
-                        if (dictRef.TryGetValue(key, out decimal dcPrecio) && dcPrecio > 0)
+                    // Una muestra por nivel destino antes de asignar; se renueva en cada pasada.
+                    var dicRefPorNivel = lstFiltRecResid
+                        .Select(rec => NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles)).Distinct()
+                        .ToDictionary(intNivelDestino => intNivelDestino, intNivelDestino =>
+                            MatPrimaReproceso.GenerarPromedioRespaldo(lstTodos, mapaNiveles, intNivelDestino, ConfigRespaldoRpc.Modo));
+
+                    var indiceDisponible = new MatPrimaReproceso.IndiceDisponibleHistorico(lstTodos);
+                    indiceDisponible.BloquearProcesadosAgotados();
+                    // Con la bandera apagada se conserva el orden previo.
+                    var recibidosOrdenados = ConfigRespaldoRpc.HistoricoPonderado
+                        ? lstFiltRecResid.OrderBy(x => NivelCosteo.ObtenerNivel(x.strTipCod, mapaNiveles)).ToList() : lstFiltRecResid;
+                    // Pasada 1: todo DISP antes de que HIST absorba fuentes de niveles superiores.
+                    // Se reutiliza el índice: filas vivas y disponible actualizado por Confirmar.
+                    if (ConfigRespaldoRpc.HistoricoPonderado)
+                        foreach (var rec in recibidosOrdenados)
                         {
-                            _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod)));
+                            decimal dcPrecioDisponible = MatPrimaReproceso.ObtenerCostoDisponibleLote(rec, lstTodos, indiceDisponible);
+                            if (dcPrecioDisponible <= 0) continue;
+                            _objMotorAsigPrec.AsignarPrecio(rec, dcPrecioDisponible, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles)));
+                            indiceDisponible.Confirmar(rec);
+                        }
+                    // Pasada 2: HIST para los pendientes y luego RESP; sin bandera, DISP → RESP como antes.
+                    foreach (var rec in recibidosOrdenados)
+                    {
+                        if (ConfigRespaldoRpc.HistoricoPonderado && rec.dbCostoXSecuencial != 0) continue;
+                        // Prioridad: disponible del lote, histórico opcional y respaldo vigente.
+                        // decimal dcPrecio = MatPrimaReproceso.ObtenerCostoDisponibleLote(rec, lstTodos);
+                        // decimal dcPrecio = MatPrimaReproceso.ObtenerCostoDisponibleLote(rec, lstTodos, indiceDisponible);
+                        decimal dcPrecio = ConfigRespaldoRpc.HistoricoPonderado ? 0m
+                            : MatPrimaReproceso.ObtenerCostoDisponibleLote(rec, lstTodos, indiceDisponible);
+                        if (dcPrecio > 0)
+                        {
+                            _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles)));
+                            indiceDisponible.Confirmar(rec);
+                            continue;
+                        }
+                        if (ConfigRespaldoRpc.HistoricoPonderado)
+                        {
+                            dcPrecio = MatPrimaReproceso.ObtenerCostoHistorico(rec, lstTodos, mapaNiveles, indiceDisponible);
+                            if (dcPrecio > 0)
+                            {
+                                _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles)));
+                                indiceDisponible.Confirmar(rec);
+                                continue;
+                            }
+                        }
+                        var key = new LoteRpcKeyXProdTal(rec.intCodProd, rec.intCodTal);
+                        var dictRef = dicRefPorNivel[NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles)];
+                        if (dictRef.TryGetValue(key, out dcPrecio) && dcPrecio > 0)
+                        {
+                            _objMotorAsigPrec.AsignarPrecio(rec, dcPrecio, NivelCosteo.EtiquetaNivel(NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles)));
+                            if (!rec.blExcluidoCosteo) rec.strOrigenCosto = "RESP";
+                            // Temporal: MotorProrrateo no recibe ILogger; habilitarlo antes de activar esta traza.
+                            // _objLogger.LogInformation($"[DiagPonderadoRpc] Lote={rec.intLotNumero} Nivel={NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles)} Prod={rec.intCodProd} Talla={rec.intCodTal} Precio={rec.dbCostoXSecuencial:F4} Modo={ConfigRespaldoRpc.Modo} NivelesFuente={(ConfigRespaldoRpc.Modo == ModoRespaldoRpc.Actual ? "Todos" : (NivelCosteo.ObtenerNivel(rec.strTipCod, mapaNiveles) - 1).ToString())}");
                         }
                     }
                 }
@@ -88,12 +128,12 @@ namespace CostManagement.Dominio.Reglas
             // Guardia de completitud: lbs con costo vs total por (lote, nivel)
             var lbsCost = lstItemsLote
                 .Where(x => x.strAgrupacion == "1. RECIBIDO" && x.dbCostoXSecuencial > 0)
-                .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod)))
+                .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod, mapaNiveles)))
                 .ToDictionary(g => g.Key, g => (decimal)g.Sum(x => x.dbLibras));
 
             var lbsTot = lstItemsLote
                 .Where(x => x.strAgrupacion == "1. RECIBIDO" && !x.blExcluidoCosteo)
-                .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod)))
+                .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod, mapaNiveles)))
                 .ToDictionary(g => g.Key, g => (decimal)g.Sum(x => x.dbLibras));
 
             // Libras RECIBIDO sin costear que son material de laboratorio (LB04):
@@ -104,7 +144,7 @@ namespace CostManagement.Dominio.Reglas
                          && x.dbCostoXSecuencial == 0
                          && !x.blExcluidoCosteo
                          && string.Equals(x.strTipCod?.Trim(), "LB04", StringComparison.OrdinalIgnoreCase))
-                .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod)))
+                .GroupBy(x => new LoteRpcNivelCosteo(x.intLotNumero, NivelCosteo.ObtenerNivel(x.strTipCod, mapaNiveles)))
                 .ToDictionary(g => g.Key, g => (decimal)g.Sum(x => x.dbLibras));
 
             // ── BLOQUE C: Costear cada PROCESADO sin precio ────────────────────
@@ -112,17 +152,21 @@ namespace CostManagement.Dominio.Reglas
                 x.strAgrupacion == "2. PROCESADO" && x.dbCostoXSecuencial == 0))
             {
                 var objKeySec = new LoteRpcKeyXSec(objItemLote.intLotNumero, objItemLote.intLoteUnificado);
-                int intNivel = NivelCosteo.ObtenerNivel(objItemLote.strTipCod);
+                int intNivel = NivelCosteo.ObtenerNivel(objItemLote.strTipCod, mapaNiveles);
                 var strNivelLabel = NivelCosteo.EtiquetaNivel(intNivel);
 
                 bool blEsRecibidoCosteado = dicDolRec.TryGetValue(objKeySec, out decimal dcTotalDolRec);
                 bool blEsLbsProceso = dicLbsProc.TryGetValue(objKeySec, out decimal dcLbsTotalProc);
 
                 // ── Métodos especiales (UNI, R7, CDI en NV2) ──────────────────
-                if (NivelCosteo.AplicaMetodoEspecial(objItemLote.strTipCod))
+                if (NivelCosteo.AplicaMetodoEspecial(objItemLote.strTipCod, mapaNiveles))
                 {
+                    // aislar UNI/R7/CDI (MotorAsignacionPrecios) del prorrateo general.
+                    // using var objTiempoEspecial = MedicionTiempos.IniciarTramo($"asignacion-especial-{objItemLote.strTipCod}");
                     objItemLote.strNivel = strNivelLabel;
-                    var lstLotOrigen = MatPrimaReproceso.ObtenerLstLoteXRepro(lstTodos, objItemLote);
+                    var lstLotOrigen = MatPrimaReproceso.ObtenerLstLoteXRepro(
+                        // el indice contiene exactamente las filas del lote; conserva Distinct y orden.
+                        objIndiceXLote != null ? objIndiceXLote[objKeySec] : lstTodos, objItemLote);
 
                     switch (objItemLote.strTipCod.Trim().ToUpper())
                     {
