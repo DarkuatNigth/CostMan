@@ -104,4 +104,6 @@ public partial class TbMateriaPrimaReproValorizada
     [StringLength(60)]
     [Unicode(false)]
     public string? MrEquipoEli { get; set; }
+
+    public virtual ICollection<TbMateriaPrimaReproValorizadaDetalle> TbMateriaPrimaReproValorizadaDetalle { get; set; } = new List<TbMateriaPrimaReproValorizadaDetalle>();
 }

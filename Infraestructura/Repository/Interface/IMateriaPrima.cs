@@ -2,6 +2,8 @@
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.EF_Core;
 using CostManagementService.Aplicación.DTos;
+using CostManagementService.Aplicacion.DTos;
+using CostManagementService.Dominio.Entidades;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -10,6 +12,10 @@ namespace CostManagement.Infraestructura.Repository.Interface
 {
     public interface IMateriaPrima
     {
+        // únicamente lecturas de cobertura y cabeceras/detalles AC.
+        Task<(List<TbParametroCosteo> lstParametros, List<DateOnly> lstDistribuciones,
+            List<CierreReproLineaDto> lstLineas)> ObtenerCierreReproGuardado(DateOnly dtInicio, DateOnly dtFin);
+
         Task<List<RptGrncLibras>> ObtenerProduccionXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
         Task<List<LbsCongelamiento>> ObtenerMatPrimFrsCongeXRangoFecha(DateOnly dtFechaInicio, DateOnly dtFechaFin);
@@ -36,8 +42,10 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<MatPrimaReproceso>> ReporteReproPlanRecibProc(DateOnly dtFechaInicio, DateOnly dtFechaFin);
         Task<List<MatPrimaReproceso>> ReporteReproPlanProc(DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
-        Task<ILookup<(string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<string> lstCodProd);
-        Task<ILookup<LoteRpcKeyReci, decimal>> ObtenerMatPrimSaldo(List<int> lstLiqLote);
+        // Antes: Task<ILookup<(string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<string> lstCodProd);
+        Task<ILookup<(string Producto, short Talla), decimal>> ObtenerMatPrimSaldo(List<string> lstCodProd, DateOnly dtFechaInicio);
+        // Antes: Task<ILookup<LoteRpcKeyReci, decimal>> ObtenerMatPrimSaldo(List<int> lstLiqLote);
+        Task<ILookup<LoteRpcKeyReci, decimal>> ObtenerMatPrimSaldo(List<int> lstLiqLote, DateOnly dtFechaInicio);
        
         Task<List<CostoMovArtDto>> CostoUltMovXItemCod(List<string> lstItemCod, DateOnly dtFechaInicio, DateOnly dtFechaFin);
         Task<List<PrecioFrsXMov>> ObtenerPrecioFrsSinTallaXMovCam(List<long> lstLiqLotes/*, bool blUniCola = false*/);
@@ -60,6 +68,12 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<CostoMatEmpProdXCietunDto>> ObtenerCostMatEmpRpcProdXLiq(List<decimal> lstLote);
         Task<ConcurrentDictionary<string, string>> ConsultarItemEtiqueta();
         Task<ConcurrentDictionary<string, string>> ConsultarItemMasterCajita();
+
+        Task ObtenerCostoPromMov2XFichaTecnica(
+            List<CostoMatEmpProdXCietunDto> lstInfoCierreTun,
+            DateOnly dtFechaInicio,
+            DateOnly dtFechaFin);
+
         Task ObtenerCostoPromBoditeXFichaTecnica(List<CostoMatEmpProdXCietunDto> lstInfoCierreTun, DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
         Task ObtenerCostoPromMov1XFichaTecnica(List<CostoMatEmpProdXCietunDto> lstInfoCierreTun, DateOnly dtFechaInicio, DateOnly dtFechaFin);
@@ -67,10 +81,14 @@ namespace CostManagement.Infraestructura.Repository.Interface
         #endregion
 
         Task<List<InventarioVal>> ConsultarInvValorizado(DateOnly dtFechaInicio, DateOnly dtFechaFin);
+
+        Task<List<MuestrasObsequiosDto>> ObtenerMuestrasObsequios(DateOnly dtFechaInicio, DateOnly dtFechaFin);
         Task<List<DateOnly>> ConsultarFechaCorteInv();
         Task<List<DiarioCosto>> ObtenerMovimientosAsync(DateOnly dtFechaInicio,DateOnly dtFechaFin);
 
-        Task<List<InventarioVal>> ConsultarInvValBodite(DateOnly dtFechaCorte, string strTipoInv);
+        // Antes: Task<List<InventarioVal>> ConsultarInvValBodite(DateOnly dtFechaCorte, string strTipoInv);
+        Task<List<InventarioVal>> ConsultarInvValBodite(DateOnly dtFechaCorte, string strTipoInv, bool blUltimoDisponible = false);
+        Task<List<InventarioVal>> ConsultarInvFinalGuardado(DateOnly dtFechaCorte);
 
 
         Task<List<DiarioCosto>> EgresosInvXrangoFecha(DateOnly dtFechaInicio,DateOnly dtFechaFin);
@@ -82,6 +100,8 @@ namespace CostManagement.Infraestructura.Repository.Interface
         Task<List<InfoTalProd>> ObtenerInfoCodTal();
         Task<List<InfoProd>> ObtenerInfoProd(List<string> lstProdCod);
         Task<List<CostVentUni>> ConsultarLotePiso(List<decimal> lstLotNumero);
+
+        Task<List<ParamRectrac>> ObtenerInfoRectractiladoXLote(DateOnly dtFechaInicio, DateOnly dtFechaFin);
 
     }
 }

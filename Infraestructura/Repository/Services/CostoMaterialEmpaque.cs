@@ -1,4 +1,4 @@
-using CostManagement.Aplicación.DTos;
+﻿using CostManagement.Aplicación.DTos;
 using CostManagement.Dominio.Entidades;
 using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.EF_Core;
@@ -146,7 +146,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                     {
                         CostoMatEmpProdXCietunDto objEmpaqueInfo = lstCostosEmpaque.First();
 
-                        var objCabecera = await objContext.TbCostoEmpaqueCab
+                        // var objCabecera = await objContext.TbCostoEmpaqueCab
+                            // .FirstOrDefaultAsync(c => c.CeRloNumero == objEmpaqueInfo.intLiqLote &&
+                                                      // c.CeProCodcor == objEmpaqueInfo.strProCodCor);
+                        var objCabecera = await objContext.TbCostoEmpaqueCab.AsTracking()
                             .FirstOrDefaultAsync(c => c.CeRloNumero == objEmpaqueInfo.intLiqLote &&
                                                       c.CeProCodcor == objEmpaqueInfo.strProCodCor);
 
@@ -173,7 +176,9 @@ namespace CostManagement.Infraestructura.Repository.Services
                             await objContext.SaveChangesAsync();
                         }
 
-                        var objDetallesExist = await objContext.TbCostoEmpaqueDet
+                        // var objDetallesExist = await objContext.TbCostoEmpaqueDet
+                            // .Where(d => d.CdCcId == objCabecera.CeId).ToListAsync();
+                        var objDetallesExist = await objContext.TbCostoEmpaqueDet.AsTracking()
                             .Where(d => d.CdCcId == objCabecera.CeId).ToListAsync();
 
                         if (objDetallesExist.Count == 0)
@@ -215,6 +220,32 @@ namespace CostManagement.Infraestructura.Repository.Services
                                 objCabecera.CcCosto = Math.Round(dcCostoTotalAc, 4);
                             }
                         }
+                        else
+                        {
+                            // Lote/producto ya guardado: se actualiza precio y origen por codigo de item guardado; nunca codigo, cantidad ni grupo; items nuevos de la ficha se ignoran
+                            decimal dcDivisorAct = objCabecera.CeLbsMaster == 0 ? 1 : objCabecera.CeLbsMaster;
+                            decimal dcCostoTotalAct = 0;
+                            foreach (var objDetExist in objDetallesExist)
+                            {
+                                var objLinea = lstCostosEmpaque.FirstOrDefault(l => l.intEftItem == objDetExist.CdEftId);
+                                if (objLinea != null && (objLinea.dbPrecioUnit ?? 0d) > 0d)
+                                {
+                                    objDetExist.CdCostoPromedio = Math.Round((decimal)objLinea.dbPrecioUnit!.Value, 4);
+                                    objDetExist.CdCostoUltimoConsumo = Math.Round((decimal)objLinea.dbPrecioUltConsumo, 4);
+                                    objDetExist.CdOrigenCosto = objLinea.strEstadoFicha ?? "X";
+                                    objDetExist.CdUsuarioMod = usuario;
+                                    objDetExist.CdFechaMod = DateTime.Now;
+                                    objDetExist.CdEquipoMod = equipo;
+                                }
+                                dcCostoTotalAct += objDetExist.CdCostoPromedio * objDetExist.CdEftCantidad / dcDivisorAct;
+                            }
+                            objCabecera.CcCosto = Math.Round(dcCostoTotalAct, 4);
+                            objCabecera.CcUsuarioMod = usuario;
+                            objCabecera.CcFechaMod = DateTime.Now;
+                            objCabecera.CcEquipoMod = equipo;
+                            int intItemsNoGuardados = lstCostosEmpaque.Count(l => !objDetallesExist.Any(d => d.CdEftId == l.intEftItem));
+                            if (intItemsNoGuardados > 0) _objLogger.LogInformation($"Lote {objEmpaqueInfo.intLiqLote}, Codigo {objEmpaqueInfo.strProCodCor}: {intItemsNoGuardados} item(s) de la ficha actual no estan guardados y se ignoran");
+                        }
 
                         await objContext.SaveChangesAsync();
                     },
@@ -252,6 +283,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     from cab in filtered
                                     select new
                                     {
+                                        cab.CeId, // desempate estable de cabeceras para las colas.
                                         Lote = cab.CeRloNumero,
                                         CodProd = cab.CeProCodcor.Trim(),
                                         dtFechaLote = cab.CeFecha,
@@ -260,9 +292,10 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     }
                             );
 
-                        dictColasProd = LiquidacionResultado.GenerarDiccionarioProcMatEmp(lstResultado);
+                        dictColasProd = LiquidacionResultado.GenerarDiccionarioProcMatEmp(EntradaCosteo.OrdenarFresco(lstResultado));
 
                         dictCostMatEmp = costosCabecera
+                            .OrderBy(x => x.Lote).ThenBy(x => x.CodProd, StringComparer.Ordinal).ThenBy(x => x.CeId)
                             .GroupBy(x => new LoteRpcKeyLoteXProd(x.Lote, x.CodProd.ToString().Trim()))
                             .ToDictionary(g => g.Key, g => new Queue<decimal>(g.Select(c => c.CcCosto)));
 
@@ -333,6 +366,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                     from cab in filtered
                                     select new
                                     {
+                                        cab.CeId, // desempate estable de cabeceras para las colas.
                                         Lote = cab.CeRloNumero,
                                         CodProd = cab.CeProCodcor.Trim(),
                                         dtFechaLote = cab.CeFecha,
@@ -342,10 +376,11 @@ namespace CostManagement.Infraestructura.Repository.Services
                             );
 
                         dictCostMatEmp = objCostCabecera
+                            .OrderBy(x => x.Lote).ThenBy(x => x.CodProd, StringComparer.Ordinal).ThenBy(x => x.CeId)
                             .GroupBy(x => new LoteRpcKeyLoteXProd(x.Lote, x.CodProd))
                             .ToDictionary(g => g.Key, g => new Queue<decimal>(g.Select(c => c.CcCosto)));
 
-                        dictColasProd = MatPrimaReproceso.GenerarDiccionarioProcMatEmp(lstMatPrimaReproSinCostMatProd);
+                        dictColasProd = MatPrimaReproceso.GenerarDiccionarioProcMatEmp(EntradaCosteo.OrdenarRepro(lstMatPrimaReproSinCostMatProd));
 
                         foreach (var entry in dictColasProd)
                         {
@@ -413,6 +448,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                 strEmbDescri = cab.CcEmbCodigo,
                                 dcProCostoDesperdicioBobina = det.CdCostoDespericioBobina,
                                 strEstadoEmpaque = det.CdOrigenCosto,
+                                strGrupoFicha = det.CdEftItem,
                                 intLiqLote = cab.CeRloNumero,
                                 dtFechaLote = cab.CeFecha,
                             }
@@ -465,6 +501,7 @@ namespace CostManagement.Infraestructura.Repository.Services
                                         strEmbDescri = cab.CcEmbCodigo,
                                         dcProCostoDesperdicioBobina = det.CdCostoDespericioBobina,
                                         strEstadoEmpaque = det.CdOrigenCosto,
+                                        strGrupoFicha = det.CdEftItem,
                                         intLiqLote = cab.CeRloNumero,
                                         dtFechaLote = cab.CeFecha,
                                     }

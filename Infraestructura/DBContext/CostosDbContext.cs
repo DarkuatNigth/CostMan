@@ -1,8 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using CostManagement.Infraestructura.EF_Core;
+﻿using CostManagement.Infraestructura.EF_Core;
 using CostManagementService.Infraestructura.EF_Core;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
 
 namespace CostManagement.Infraestructura.DBContext;
 
@@ -25,6 +25,10 @@ public partial class CostosDbContext : DbContext
 
     public virtual DbSet<TbMateriaPrimaReproValorizada> TbMateriaPrimaReproValorizada { get; set; }
 
+    public virtual DbSet<TbMateriaPrimaFrescoValorizadaDetalle> TbMateriaPrimaFrescoValorizadaDetalle { get; set; }
+
+    public virtual DbSet<TbMateriaPrimaReproValorizadaDetalle> TbMateriaPrimaReproValorizadaDetalle { get; set; }
+
     public virtual DbSet<TbMateriaPrimaFrescoValorizadaMotivoCambios> TbMateriaPrimaFrescoValorizadaMotivoCambios { get; set; }
 
     public virtual DbSet<TbMateriaPrimaSaldo> TbMateriaPrimaSaldo { get; set; }
@@ -37,7 +41,23 @@ public partial class CostosDbContext : DbContext
 
     public virtual DbSet<TbProcesoCosteo> TbProcesoCosteo { get; set; }
 
+    public virtual DbSet<TbTarifaDecoradosRetractilado> TbTarifaDecoradosRetractilado { get; set; }
 
+    public virtual DbSet<TbDistribucionCosto> TbDistribucionCosto { get; set; }
+
+    public virtual DbSet<TbDistribucionProcesoProductivo> TbDistribucionProcesoProductivo { get; set; }
+
+    public virtual DbSet<TbConfigCuentaCosto> TbConfigCuentaCosto { get; set; }
+
+    public virtual DbSet<TbConfigTipoLiquidacionProcesoCosto> TbConfigTipoLiquidacionProcesoCosto { get; set; }
+
+    public virtual DbSet<TbEtapacosto> TbEtapacosto { get; set; }
+
+    public virtual DbSet<TbProcesocosto> TbProcesocosto { get; set; }
+
+    public virtual DbSet<TbTipoOtrosProcesos> TbTipoOtrosProcesos { get; set; }
+
+    public virtual DbSet<TbTipolote> TbTipolote { get; set; }
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -146,6 +166,138 @@ public partial class CostosDbContext : DbContext
             entity.Property(e => e.McEquipoCrea).HasDefaultValueSql("(host_name())");
             entity.Property(e => e.McFechaCrea).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.McId).ValueGeneratedOnAdd();
+        });
+
+        modelBuilder.Entity<TbTarifaDecoradosRetractilado>(entity =>
+        {
+            entity.Property(e => e.TrEmbCodigo).HasComment("Codigo de embalaje. Ref SVRSNG04.PRODUCCION.dbo.tb_embala");
+            entity.Property(e => e.TrEmbPeso).HasComment("Peso del embalaje. Ref SVRSNG04.PRODUCCION.dbo.tb_embala");
+            entity.Property(e => e.TrMedCodigo).HasComment("Codigo de la unidad de medida. Ref SVRSNG04.PRODUCCION.dbo.tb_medida");
+        });
+
+
+        modelBuilder.Entity<TbDistribucionCosto>(entity =>
+        {
+            entity.Property(e => e.DpEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.DpFechaCrea).HasDefaultValueSql("(getdate())");
+        });
+
+        modelBuilder.Entity<TbDistribucionProcesoProductivo>(entity =>
+        {
+            entity.ToTable(
+                "tb_distribucionProcesoProductivo",
+                "costos");
+
+            entity.Property(e => e.DpFechaCrea)
+                .HasDefaultValueSql("(getdate())");
+
+            entity.Property(e => e.DpEquipoCrea)
+                .HasDefaultValueSql("(host_name())");
+        });
+
+        modelBuilder.Entity<TbConfigCuentaCosto>(entity =>
+        {
+            entity.HasKey(e => e.CcId).HasName("PK_tb_configCuentaCosteo");
+
+            entity.Property(e => e.CcPcCodigo).HasMaxLength(5).IsUnicode(false).HasColumnName("cc_pcCodigo");
+
+            entity.Property(e => e.EcEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.EcFechaCrea).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.CcEcCodigoNavigation).WithMany(p => p.TbConfigCuentaCosto)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_tb_configCuentaCosteo_etapaCosto");
+        });
+
+        modelBuilder.Entity<TbConfigTipoLiquidacionProcesoCosto>(entity =>
+        {
+            entity.Property(e => e.CgEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.CgFechaCrea).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.CgPcCodigoNavigation).WithMany(p => p.TbConfigTipoLiquidacionProcesoCosto)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_tb_configTipoLiquidacion_procesoCosto_tb_procesocosto");
+
+            entity.HasOne(d => d.CgToCodigoNavigation).WithMany(p => p.TbConfigTipoLiquidacionProcesoCosto)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_tb_configTipoLiquidacion_procesoCosto_tb_tipoOtrosProcesos");
+        });
+
+        modelBuilder.Entity<TbEtapacosto>(entity =>
+        {
+            entity.Property(e => e.EcEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.EcFechaCrea).HasDefaultValueSql("(getdate())");
+        });
+
+        modelBuilder.Entity<TbProcesoCosteo>(entity =>
+        {
+            entity.ToTable("tb_procesoCosteo", "costos", tb => tb.HasComment("Procesos para costeo de produccion (primarios: recepcion, codificacion, descabezado); congelacion (brine, iqf, tunel), etc."));
+
+            entity.Property(e => e.PrId).ValueGeneratedOnAdd();
+            entity.Property(e => e.PrEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.PrFechaCrea).HasDefaultValueSql("(getdate())");
+        });
+
+        modelBuilder.Entity<TbProcesocosto>(entity =>
+        {
+            entity.Property(e => e.PcEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.PcFechaCrea).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.PcEcCodigoNavigation).WithMany(p => p.TbProcesocosto)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_tb_procesocosto_etapacosto");
+        });
+
+        modelBuilder.Entity<TbTipoOtrosProcesos>(entity =>
+        {
+            entity.Property(e => e.ToEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.ToFechaCrea).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.ToTlCodigoNavigation).WithMany(p => p.TbTipoOtrosProcesos)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_tb_tipoOtrosProcesos_tipolote");
+        });
+
+        modelBuilder.Entity<TbTipolote>(entity =>
+        {
+            entity.Property(e => e.TlEquipoCrea).HasDefaultValueSql("(host_name())");
+            entity.Property(e => e.TlFechaCrea).HasDefaultValueSql("(getdate())");
+        });
+
+        modelBuilder.Entity<TbMateriaPrimaFrescoValorizadaDetalle>(entity =>
+        {
+            entity.HasKey(e => e.MfdId).HasName("PK_MateriaPrimaFrescoValorizadaDetalle");
+            entity.Property(e => e.MfdFechaCrea).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.MfdEquipoCrea).HasDefaultValueSql("(host_name())");
+
+            entity.HasOne(d => d.MfdMf).WithMany(p => p.TbMateriaPrimaFrescoValorizadaDetalle)
+                .HasForeignKey(d => d.MfdMfId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_MPFVD_Fresco");
+
+            entity.HasOne<TbProcesocosto>().WithMany()
+                .HasForeignKey(d => d.MfdPcCodigo)
+                .HasPrincipalKey(p => p.PcCodigo)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_MPFVD_Proceso");
+        });
+
+        modelBuilder.Entity<TbMateriaPrimaReproValorizadaDetalle>(entity =>
+        {
+            entity.HasKey(e => e.MrdId).HasName("PK_MateriaPrimaReproValorizadaDetalle");
+            entity.Property(e => e.MrdFechaCrea).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.MrdEquipoCrea).HasDefaultValueSql("(host_name())");
+
+            entity.HasOne(d => d.MrdMr).WithMany(p => p.TbMateriaPrimaReproValorizadaDetalle)
+                .HasForeignKey(d => d.MrdMrId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_MPRVD_Repro");
+
+            entity.HasOne<TbProcesocosto>().WithMany()
+                .HasForeignKey(d => d.MrdPcCodigo)
+                .HasPrincipalKey(p => p.PcCodigo)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_MPRVD_Proceso");
         });
 
         OnModelCreatingPartial(modelBuilder);

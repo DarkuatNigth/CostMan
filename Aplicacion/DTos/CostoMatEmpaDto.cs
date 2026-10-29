@@ -45,6 +45,10 @@ namespace CostManagement.Aplicación.DTos
         [Column("grupo")]
         public string? strGrupo { get; set; }
 
+        [Column("grupo_ficha")]
+        [NotMapped]
+        public string? strGrupoFicha { get; set; }
+
         [Column("eft_cantidad")]
         public float? dcEftCantidad { get; set; }
 

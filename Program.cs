@@ -1,16 +1,28 @@
 ﻿using CostManagement.Aplicación.Features;
 using CostManagement.Dominio.Entidades;
+using CostManagement.Dominio.Reglas;
 using CostManagement.Infraestructura.DBContext;
 using CostManagement.Infraestructura.Utils;
 using CostManagementService.Infraestructura.Repository;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Serilog;
 using System;
+using System.Text;
 
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Cargar una sola vez el modo de respaldo; valores ausentes o inválidos conservan Actual.
+ConfigRespaldoRpc.Modo = Enum.TryParse<ModoRespaldoRpc>(builder.Configuration.GetValue<string>("Reproceso:ModoRespaldo"), true, out var modoRespaldo) && Enum.IsDefined(modoRespaldo) ? modoRespaldo : ModoRespaldoRpc.Actual;
+// Las banderas se cargan una vez; ausentes o inválidas quedan en false.
+ConfigRespaldoRpc.HistoricoPonderado = bool.TryParse(builder.Configuration["Reproceso:HistoricoPonderado"], out var historicoPonderado) && historicoPonderado;
+ConfigRespaldoRpc.RetrocosteoEspeciales = bool.TryParse(builder.Configuration["Reproceso:RetrocosteoEspeciales"], out var retrocosteoEspeciales) && retrocosteoEspeciales;
 
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
@@ -28,7 +40,6 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(optio
 var logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
 
 Log.Logger = new LoggerConfiguration()
-    // 1. Silencia los Queries SQL (Nivel Información)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", Serilog.Events.LogEventLevel.Warning)
 
     // 2. SILENCIA LOS WARNINGS DE MODELO (Esto quitará los mensajes de Decimal y Byte Identity)
@@ -38,6 +49,7 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Infrastructure", Serilog.Events.LogEventLevel.Error)
     .Filter.ByExcluding(logEvent => logEvent.Properties.ContainsKey("SourceContext")
         && logEvent.Properties["SourceContext"].ToString().Contains("Microsoft.EntityFrameworkCore.Database.Command")) // OPCIÓN B: Excluir totalmente
+
     .WriteTo.Console()
     .WriteTo.File(
         path: "Logs/CostManagament_log-.txt",
@@ -57,6 +69,19 @@ builder.Services.AddControllers()
     .AddNewtonsoftJson(options =>
     {
         options.SerializerSettings.DateFormatString = "yyyy-MM-ddTHH:mm:ss";
+    })
+.ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = ctx =>
+        {
+            var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+            foreach (var (campo, entry) in ctx.ModelState.Where(m => m.Value!.Errors.Count > 0))
+                foreach (var err in entry.Errors)
+                    logger.LogWarning("ModelState inválido. Campo={Campo} Error={Error} Excepcion={Ex}",
+                        campo, err.ErrorMessage, err.Exception?.Message);
+
+            return new BadRequestObjectResult(new ValidationProblemDetails(ctx.ModelState));
+        };
     });
 //Se reemplaza la forma de agregar servicios de la capa de infraestructura para evitar problemas de dependencias circulares
 //builder.Services.AddScoped<IExcelExportService, ExcelExportService>();
@@ -82,6 +107,55 @@ builder.Services.AddCors(options =>
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "CostManagementService", Version = "v1" });
+    c.MapType<IFormFile>(() => new OpenApiSchema { Type = "string", Format = "binary" });
+    // Definici�n de seguridad para JWT
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        In = ParameterLocation.Header,
+        Description = "Por favor, agregue el token para estar autenticado",
+        Name = "Authorization",
+        Type = SecuritySchemeType.ApiKey
+    });
+
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] { }
+        }
+    });
+});
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.RequireHttpsMetadata = false;
+        options.SaveToken = true;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuers = builder.Configuration.GetSection("Jwt:Issuer").Get<string[]>(),
+            ValidAudiences = builder.Configuration.GetSection("Jwt:Audience").Get<string[]>(),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"])),
+            NameClaimType = "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+builder.Services.AddAuthorization();
 
 builder.Services.AddDbContextFactory<CostManagementDbContext>((serviceProvider, options) =>
 {
@@ -127,6 +201,7 @@ builder.Services.AddDbContextFactory<CostosDbContext>(options => {
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

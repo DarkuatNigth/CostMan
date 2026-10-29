@@ -1,4 +1,5 @@
-﻿using CostManagement.Infraestructura.EF_Core;
+﻿using CostManagement.Dominio.Reglas;
+using CostManagement.Infraestructura.EF_Core;
 using Microsoft.Extensions.DependencyModel;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
@@ -138,9 +139,6 @@ namespace CostManagement.Dominio.Entidades
         [Column("Certi")]
         public string? strCertificado { get; set; }
 
-        [Column("Premio")]
-        public decimal? dcCertificado { get; set; }
-
         [JsonIgnore]
         [Column("Libras Decorado")]
         public decimal? dcLibrasDecorado { get; set; }
@@ -154,6 +152,17 @@ namespace CostManagement.Dominio.Entidades
 
         [Column("Proceso")]
         public decimal? dcTarifaProc { get; set; }
+
+        // montos calculados de procesos sin columna dedicada.
+        [NotMapped][JsonIgnore]
+        public Dictionary<string, decimal> ProcesosAdicionales { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        // [NotMapped][Column("Otros Procesos")]
+        [NotMapped][JsonIgnore]
+        public decimal? dcOtrosProcesos => ProcesosAdicionales.Count == 0 ? null : ProcesosAdicionales.Values.Sum();
+
+        // vista del catálogo preparada por la feature, solo para reportes MP.
+        [NotMapped][JsonIgnore]
+        public Dictionary<string, Dictionary<string, decimal>>? dicProcesosReporte { get; set; }
 
 
         [Column("Proceso Primario")] // Este nombre será el título del Merge en Excel
@@ -174,6 +183,9 @@ namespace CostManagement.Dominio.Entidades
         [Column("Costos Indirectos")]
         public ProcesoCostIndirectoDto ProcesoCostIndirecto { get; set; } = new ProcesoCostIndirectoDto();
 
+        [Column("Premio")]
+        public decimal? dcCertificado { get; set; }
+
         [Column("Total Mat Prim")]
         public double? dcTotalDol { get; set; }
 
@@ -185,15 +197,43 @@ namespace CostManagement.Dominio.Entidades
         [Column("Total Proceso")]
         public decimal? dcCostTotalProc { get; set; }
 
+        [Column("Total Warren")]
+        public decimal? dcTotalWarren { get; set; }
+
+        // Mantener dcTotalDolSum como está:
         [Column("Total Costos")]
         public decimal dcTotalDolSum { get; set; }
+
+        // Agregar inmediatamente debajo de dcTotalDolSum:
+        [Column("Total Costo Warren")]
+        public decimal? dcTotalCostoWarren { get; set; }
         //[NotMapped]
         //[JsonIgnore]
         [Column("Costo X Libra")]
         public decimal? dcCostoTotXLibra { get; set; }
 
+        [Column("Costo X Libra Warren")]
+        public decimal? dcCostoTotXLibraWarren { get; set; }
+
         [Column("Validador")]
         public decimal dcValidador { get; set; }
+
+        // Control Warren del reporte: lo que la línea cede (Entero, negativo) o recibe (Cola, positivo) frente a su Total Proceso.
+        // Filtrado por Entero o Cola, la suma debe coincidir con el ajuste total de Warren.
+        [NotMapped]
+        [Column("Ajuste Warren")]
+        public decimal? dcAjusteWarrenLinea => dcTotalWarren.HasValue ? dcTotalWarren.Value - (dcCostTotalProc ?? 0m) : null;
+
+        [NotMapped]
+        [Column("Ajuste Warren X Libra")]
+        public decimal? dcAjusteWarrenXLibra => dcAjusteWarrenLinea.HasValue && dcLibras > 0d ? dcAjusteWarrenLinea.Value / (decimal)dcLibras : null;
+
+        // Total Costo Warren − (Total Costos + ajuste por libra × libras). Debe ser 0; un valor distinto indica una línea que no cuadra.
+        [NotMapped]
+        [Column("Validador Warren")]
+        public decimal? dcValidadorWarren => dcAjusteWarrenXLibra.HasValue && dcTotalCostoWarren.HasValue
+            ? Math.Round(dcTotalCostoWarren.Value - (dcTotalDolSum + dcAjusteWarrenXLibra.Value * (decimal)dcLibras), 4)
+            : null;
 
         [JsonIgnore]
         public decimal? dcValorCert { get; set; }
@@ -216,6 +256,9 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         [Column("BodEsBrine")]
         public bool blBodEsBrine { get; set; }
+
+        [JsonIgnore]
+        public decimal? dcCostLogistica { get; set; }
 
         [JsonIgnore]
         public decimal? dcCostRecepcion { get; set; }
@@ -294,6 +337,18 @@ namespace CostManagement.Dominio.Entidades
         [JsonIgnore]
         [Column("LiqCopack")]
         public int intCodCopacking { get; set; }
+
+        [JsonIgnore]
+        [Column("Rendimiento")]
+        public decimal dcRendimiento{ get; set; }
+
+        [JsonIgnore]
+        [Column("LbsReciXRend")]
+        public decimal dcLbsReciXRend { get; set; }
+
+        [JsonIgnore]
+        [NotMapped]
+        public bool blRetractilado { get; set; }
 
         //Por ahora solo usado con fresco
         [NotMapped]
@@ -562,6 +617,14 @@ namespace CostManagement.Dominio.Entidades
             decimal dcValCertPrecio = certPrecio ?? 0.0m;
             dcCertificado = Math.Round(dcValCertPrecio * (decimal)dcLibras, 2);
             dcValorCert = dcValCertPrecio;
+            if (!PremioVigencia.EsVigente(strCertificado, dtFechaLiq.Value)) { strCertificado = string.Empty; dcCertificado = 0m; dcValorCert = 0m; }
+        }
+
+        // aplica la vigencia del premio por tipo a una línea leída del SP (el mapeo por [Column] no pasa por los constructores).
+        public void AplicarVigenciaPremio()
+        {
+            DateOnly? dtRef = dtFechaLote ?? dtFechaLiq;
+            if (dtRef.HasValue && !PremioVigencia.EsVigente(strCertificado, dtRef.Value)) { strCertificado = string.Empty; dcCertificado = 0m; dcValorCert = 0m; }
         }
 
         public  void InitializeKeys(Enum objTipoKey)
@@ -623,10 +686,10 @@ namespace CostManagement.Dominio.Entidades
         /// </summary>
         /// <param name="lstMatPrimaFrs">Lista de objetos con los costos.</param>
         /// <returns>Diccionario donde la llave es (Lote, Producto, Talla) y el valor es el Precio Promedio calculado.</returns>
-        public static Dictionary<(int Lote, int? Producto, int? Talla), decimal?> GenerarDiccionarioCostoXTalla(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        public static Dictionary<LoteFrsKey, decimal?> GenerarDiccionarioCostoXTalla(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
         {
             if (lstMatPrimaFrs == null)
-                return new Dictionary<(int, int?, int?), decimal?>();
+                return new Dictionary<LoteFrsKey, decimal?>();
 
             return (
                             from lct in lstMatPrimaFrs
@@ -634,34 +697,55 @@ namespace CostManagement.Dominio.Entidades
                             let dcCertificado = lct.dcValorCert == null ? 0m : lct.dcValorCert
                             group new { lct, dcCostMatEmp, dcCertificado } by new
                             {
-                                Lote = lct.intLote,
-                                Producto = lct.intCodProd,
-                                Talla = lct.intLidCodTal
+                                lct.objLotkey
                             } into g
                             select new
                             {
-                                Key = (g.Key.Lote, g.Key.Producto, g.Key.Talla),
-                                PrecioPromedio = g.Average(x => x.lct.dcCostoTotXLibra)
+                                Key = g.Key.objLotkey,
+                                PrecioPromedio = g.Sum(x => (decimal)x.lct.dcLibras) == 0m ? (decimal?)null : g.Sum(x => x.lct.dcTotalCostoWarren ?? x.lct.dcTotalDolSum) / g.Sum(x => (decimal)x.lct.dcLibras)
                             }
                         ).ToDictionary(x => x.Key, x => x.PrecioPromedio);
         }
 
-        public static Dictionary<LoteFrsKey, decimal> GenerarDiccionarioLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        public decimal? ObtenerCostoXLibraParaReproceso()
+        {
+            decimal libras = (decimal)dcLibras;
+            if (libras <= 0m) return null;
+            decimal totalCierre = dcTotalCostoWarren ?? dcTotalDolSum;
+            return Math.Round(totalCierre / libras, 4, MidpointRounding.AwayFromZero);
+        }
+
+        public static Dictionary<LoteFrsKey, decimal?> GenerarDiccionarioCostoXTallaParaReproceso(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
+        {
+            if (lstMatPrimaFrs == null) return new Dictionary<LoteFrsKey, decimal?>();
+            return lstMatPrimaFrs.GroupBy(x => x.objLotkey).ToDictionary(g => g.Key, g =>
+            {
+                decimal libras = g.Sum(x => (decimal)x.dcLibras);
+                if (libras <= 0m) return (decimal?)null;
+                // Warren incluye materia prima, material de empaque y proceso Warren.
+                // Si no existe Warren, se usa el total normal.
+                decimal total = g.Sum(x => x.dcTotalCostoWarren ?? x.dcTotalDolSum);
+                return (decimal?)Math.Round(total / libras, 4, MidpointRounding.AwayFromZero);
+            });
+        }
+
+        public static Dictionary<LoteFrsKey, decimal> GenerarDiccionarioLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs, ILogger? objLogger = null)
         {
             if (lstMatPrimaFrs == null)
                 return new Dictionary<LoteFrsKey, decimal>();
 
-            return lstMatPrimaFrs
-                    .GroupBy(lct => lct.objLotkey)
-                    .ToDictionary(
-                        g => g.Key,
-                        g => (decimal)g.First().dcCostoTotXLibra
-                        //{
-                        //    decimal totLbs = (decimal)g.Sum(x => x.dcLibras);
-                        //    decimal totDol = g.Sum(x => x.dcTotalDolSum);
-                        //    return totLbs > 0 ? Math.Round(totDol / totLbs, 4) : 0m;
-                        //}
-                    );
+            var lstGruposPrecision = lstMatPrimaFrs.GroupBy(x => x.objLotkey).ToList();
+            // DiagnosticoPrecision.Diccionario(objLogger, "DiccionarioFRS", lstGruposPrecision.Count,
+                // lstGruposPrecision.Count(g => DiagnosticoPrecision.EsUnitarioDosDecimales(g.Sum(x => (decimal)x.dcLibras) <= 0m ? 0m
+                    // : Math.Round(g.Sum(x => x.dcTotalCostoWarren ?? x.dcTotalDolSum) / g.Sum(x => (decimal)x.dcLibras), 4, MidpointRounding.AwayFromZero))));
+            return lstGruposPrecision
+                    .ToDictionary(g => g.Key, g =>
+                    {
+                        decimal dcLibras = g.Sum(x => (decimal)x.dcLibras);
+                        if (dcLibras <= 0m) return 0m;
+                        decimal dcTotal = g.Sum(x => x.dcTotalCostoWarren ?? x.dcTotalDolSum);
+                        return Math.Round(dcTotal / dcLibras, 4, MidpointRounding.AwayFromZero);
+                    });
         }
 
         public static Dictionary<LoteRpcKeyXProdTal, decimal> GenerarDiccionarioPromPondLbs(IEnumerable<LiquidacionResultado> lstMatPrimaFrs)
@@ -721,6 +805,11 @@ namespace CostManagement.Dominio.Entidades
 }
     public class ProcesoPrimarioDto
     {
+
+        [Column("Logistica")]
+        [JsonProperty("Logistica")]
+        public decimal? dcLogistica { get; set; }
+
         [Column("Recepcion")]
         [JsonProperty("Recepcion")]
         public decimal? dcRecepcion { get; set; }
@@ -766,6 +855,10 @@ namespace CostManagement.Dominio.Entidades
         [Column("Descabezado")]
         [JsonProperty("Descabezado")]
         public decimal? dcDescabezado { get; set; }
+
+        [Column("Descongelado")]
+        [JsonProperty("Descongelado")]
+        public decimal? dcDescongelado { get; set; }
 
         [Column("Pelado")]
         [JsonProperty("Pelado")]

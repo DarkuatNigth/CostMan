@@ -26,7 +26,8 @@ namespace CostManagementService.Dominio.Reglas
 
             // Lookup por LoteFrsKey — record con GetHashCode optimizado
             var lookupCache = lstYaValorizados
-                .ToLookup(v => v.objLotkey);
+                .Where(v => v.objLotkey != null || (v.intCodProd.HasValue && v.intLidCodTal.HasValue))
+                .ToLookup(v => v.objLotkey ?? new LoteFrsKey(v.intLote, (int)v.intCodProd!, (int)v.intLidCodTal!));
 
             // Diccionario de enumeradores para consumir 1:1 en orden
             var dictEnumeradores = lookupCache
@@ -38,7 +39,9 @@ namespace CostManagementService.Dominio.Reglas
             {
                 foreach (var itemCrudo in lstFrescoCrudo)
                 {
-                    if (dictEnumeradores.TryGetValue(itemCrudo.objLotkey, out var enumerador) && enumerador.MoveNext())
+                    if (itemCrudo.objLotkey == null && (!itemCrudo.intCodProd.HasValue || !itemCrudo.intLidCodTal.HasValue)) continue;
+                    var objKey = itemCrudo.objLotkey ?? new LoteFrsKey(itemCrudo.intLote, (int)itemCrudo.intCodProd!, (int)itemCrudo.intLidCodTal!);
+                    if (dictEnumeradores.TryGetValue(objKey, out var enumerador) && enumerador.MoveNext())
                     {
                         itemCrudo.MergeValorizacion(enumerador.Current);
                         intMergeados++;
@@ -50,6 +53,7 @@ namespace CostManagementService.Dominio.Reglas
                 foreach (var e in dictEnumeradores.Values) e.Dispose();
             }
 
+            // DiagnosticoPrecision.Liquidaciones(_objLogger, "MergeFresco", lstFrescoCrudo);
             _objLogger.LogInformation(
                 "[MotorMergeValorizacion.MergeFresco] {Mergeados}/{Total} registros fresco valorizados desde cache.",
                 intMergeados, lstFrescoCrudo.Count);
@@ -68,7 +72,7 @@ namespace CostManagementService.Dominio.Reglas
 
             // Lookup por LoteRpcValKey — 4 campos para evitar colisiones
             var lookupCache = lstReproValorizado
-                .ToLookup(v => v.objLotRpc);
+                .ToLookup(v => v.objLotRpc ?? new LoteRpcValKey(v.intLotNumero, v.intLoteUnificado, v.intCodProd, v.intCodTal));
 
             var dictEnumeradores = lookupCache
                 .ToDictionary(g => g.Key, g => g.GetEnumerator());
@@ -80,7 +84,7 @@ namespace CostManagementService.Dominio.Reglas
                 foreach (var itemCrudo in lstRpcCrudo)
                 {
 
-                    if (dictEnumeradores.TryGetValue(itemCrudo.objLotRpc, out var enumerador) && enumerador.MoveNext())
+                    if (itemCrudo.objLotRpc != null && dictEnumeradores.TryGetValue(itemCrudo.objLotRpc, out var enumerador) && enumerador.MoveNext())
                     {
                         itemCrudo.MergeValorizacion(enumerador.Current);
                         intMergeados++;
@@ -92,6 +96,7 @@ namespace CostManagementService.Dominio.Reglas
                 foreach (var e in dictEnumeradores.Values) e.Dispose();
             }
 
+            // DiagnosticoPrecision.Reproceso(_objLogger, "MergeRepro", lstReproValorizado);
             //_objLogger.LogInformation(
             //    "[MotorMergeValorizacion.MergeRepro] {Mergeados}/{Total} registros RPC valorizados desde cache.",
             //    intMergeados, lstRpcCrudo.Count);
